@@ -42,8 +42,11 @@ def pdf_tables_to_excel(
 
     try:
         with pdfplumber.open(pdf_path) as pdf:
+            total_pages = len(pdf.pages)
             sheet_num = 0
             for page_num, page in enumerate(pdf.pages, start=1):
+                if total_pages > 1:
+                    log.info("Page %d/%d", page_num, total_pages)
                 tables = page.extract_tables()
                 if not tables:
                     continue

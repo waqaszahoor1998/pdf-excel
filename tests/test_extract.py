@@ -1,15 +1,9 @@
 """Unit tests for extract.py helpers (CSV parsing and Excel write). No API calls."""
 
-import csv
-import io
 import tempfile
 from pathlib import Path
 
 import pytest
-
-# Import from project root (parent of tests/)
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from extract import extract_csv_from_response, csv_to_excel
 
@@ -78,3 +72,18 @@ class TestCsvToExcel:
             out = Path(d) / "sub" / "out.xlsx"
             csv_to_excel(csv_content, str(out))
             assert out.exists()
+
+    def test_quoted_comma_in_cell(self):
+        """CSV with comma inside quoted value."""
+        csv_content = 'col1,col2\n"a,b",c'
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            csv_to_excel(csv_content, path)
+            from openpyxl import load_workbook
+            wb = load_workbook(path)
+            rows = list(wb.active.iter_rows(values_only=True))
+            assert rows[1][0] == "a,b"
+            assert rows[1][1] == "c"
+        finally:
+            Path(path).unlink(missing_ok=True)

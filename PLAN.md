@@ -119,25 +119,25 @@ Goal: Both scripts work on real PDFs and fail in a clear, predictable way. No ne
 | # | Task | Details | Done |
 |---|------|--------|------|
 | 1.1 | Run on 2–3 real PDFs | Different layouts; confirm sheets, headers, and data in generated .xlsx. | [ ] |
-| 1.2 | Edge cases | No tables → no crash; clear message or single empty sheet. Empty/corrupt/non-PDF → clear error. | [ ] |
+| 1.2 | Edge cases | No tables → no crash; clear message or single empty sheet. Empty/corrupt/non-PDF → clear error. | [x] |
 | 1.3 | Fix extraction if needed | Tune pdfplumber settings if tables are missed or wrong; document layouts that don’t work well. | [ ] |
-| 1.4 | Paths and overwrite | Paths with spaces; read-only or missing output dir; overwrite vs require flag — decide and implement. | [ ] |
+| 1.4 | Paths and overwrite | Paths with spaces; read-only or missing output dir; overwrite vs require flag — decide and implement. | [x] |
 
 ### 7.2 AI path (`extract.py`)
 
 | # | Task | Details | Done |
 |---|------|--------|------|
 | 1.5 | Real PDF + query test | API key set; Excel created; content matches requested section. | [ ] |
-| 1.6 | API and parsing edge cases | Missing/invalid key → clear error. Rate limit/timeout → catch and report. No CSV block → improve message/fallback. | [ ] |
-| 1.7 | PDF limits | Over 32 MB → reject before API. Password-protected → reject or document. Long PDFs → document behaviour. | [ ] |
+| 1.6 | API and parsing edge cases | Missing/invalid key → clear error. Rate limit/timeout → catch and report. No CSV block → improve message/fallback. | [x] |
+| 1.7 | PDF limits | Over 32 MB → reject before API. Password-protected → reject or document. Long PDFs → document behaviour. | [x] |
 | 1.8 | Query edge cases | No match in PDF → “no matching data” row or message; don’t crash. Very long query → no crash. | [ ] |
 
 ### 7.3 Errors and docs
 
 | # | Task | Details | Done |
 |---|------|--------|------|
-| 1.9 | Error messages and exit codes | User-facing errors short and clear; success 0, failure non-zero; scriptable. | [ ] |
-| 1.10 | Document limits and quirks | README: max size, page limit, unsupported (e.g. password, scanned), known layout limits. | [ ] |
+| 1.9 | Error messages and exit codes | User-facing errors short and clear; success 0, failure non-zero; scriptable. | [x] |
+| 1.10 | Document limits and quirks | README: max size, page limit, unsupported (e.g. password, scanned), known layout limits. | [x] |
 
 **Phase 1 sign-off:** All 1.1–1.10 done; both scripts validated on sample PDFs.
 
@@ -149,12 +149,12 @@ Goal: Consistent behaviour, maintainability, optional tests.
 
 | # | Task | Details | Done |
 |---|------|--------|------|
-| 2.1 | Output path behaviour | Document default and `-o`; create output dir if needed. | [ ] |
+| 2.1 | Output path behaviour | Document default and `-o`; create output dir if needed. | [x] |
 | 2.2 | Optional default output dir | e.g. `output/` unless `-o` set; document. | [ ] |
-| 2.3 | Logging | Use `logging`; log PDF, query (extract), output path, errors; no secrets. | [ ] |
+| 2.3 | Logging | Use `logging`; log PDF, query (extract), output path, errors; no secrets. | [x] |
 | 2.4 | Optional config | e.g. default model, output dir in `.env` or config file. | [ ] |
-| 2.5 | Unit tests (optional) | `extract.py`: CSV parsing and Excel write; optionally `tables_to_excel` with fixture/mock. | [ ] |
-| 2.6 | Test runner | e.g. pytest; document how to run. | [ ] |
+| 2.5 | Unit tests (optional) | `extract.py`: CSV parsing and Excel write; optionally `tables_to_excel` with fixture/mock. | [x] |
+| 2.6 | Test runner | e.g. pytest; document how to run. | [x] |
 
 **Phase 2 sign-off:** Output and logging consistent; tests (if added) pass.
 
@@ -166,9 +166,9 @@ Goal: Easier daily use and batch use.
 
 | # | Task | Details | Done |
 |---|------|--------|------|
-| 3.1 | CLI structure | Optional single entry (e.g. `run.py tables` / `run.py ask`) or keep two scripts; document. | [ ] |
-| 3.2 | Help and examples | `--help` and README examples for both paths. | [ ] |
-| 3.3 | Batch | Multiple PDFs → multiple Excel files (or one combined); document. | [ ] |
+| 3.1 | CLI structure | Optional single entry (e.g. `run.py tables` / `run.py ask`) or keep two scripts; document. | [x] |
+| 3.2 | Help and examples | `--help` and README examples for both paths. | [x] |
+| 3.3 | Batch | Multiple PDFs → multiple Excel files (or one combined); document. | [x] |
 | 3.4 | Progress | e.g. “Page 3/20”, “Calling API…”, “Done.” for long runs. | [ ] |
 | 3.5 | Anthropic Files API (optional) | Upload once, reuse `file_id` for multiple queries on same PDF. | [ ] |
 

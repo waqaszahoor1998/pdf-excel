@@ -117,6 +117,7 @@ def extract_pdf_to_excel(
         raise ValueError("Set ANTHROPIC_API_KEY in .env or pass api_key=...")
 
     pdf_b64 = load_pdf_base64(pdf_path)
+    log.info("Calling API…")
     client = anthropic.Anthropic(api_key=api_key)
 
     user_content = [
@@ -148,6 +149,7 @@ def extract_pdf_to_excel(
 
     csv_content = extract_csv_from_response(response_text)
     csv_to_excel(csv_content, output_path)
+    log.info("Done.")
     return output_path
 
 

@@ -4,6 +4,21 @@ A **PDF-to-Excel converter** (backend code that reads PDFs and writes Excel). Ou
 
 **Today:** You can (1) extract all tables from a PDF to Excel (offline, no AI), or (2) use the AI agent: PDF + your prompt → Excel with only the part you asked for.
 
+### Single entry point: `run.py`
+
+One script for both modes, with **batch** (multiple PDFs) and **progress** messages:
+
+```bash
+# Extract all tables (offline)
+python run.py tables report.pdf
+python run.py tables a.pdf b.pdf              # batch: one Excel per PDF
+python run.py tables ./pdfs/                  # all PDFs in directory
+
+# AI agent: extract what you ask for
+python run.py ask report.pdf "company taxes for January 2026"
+python run.py ask a.pdf b.pdf "sales table"   # same query, multiple PDFs
+```
+
 ---
 
 ## AI agent: extract what you ask for (end goal)
@@ -170,7 +185,7 @@ After `pip install -r requirements.txt`:
 pytest
 ```
 
-Or from the project root: `python -m pytest`. Tests cover CSV parsing and Excel writing in `extract.py` (no API calls).
+Or from the project root: `python -m pytest`. Run one file: `pytest tests/test_extract.py`. Tests cover CSV parsing and Excel writing in `extract.py` (no API calls).
 
 ## PDF limits and quirks
 
