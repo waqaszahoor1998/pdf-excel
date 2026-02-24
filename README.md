@@ -162,6 +162,16 @@ So: for **maximum confidentiality and offline use**, use only **`tables_to_excel
 - **Python 3.10+**
 - For AI step: **Anthropic API key** from [console.anthropic.com](https://console.anthropic.com/)
 
+## Running tests
+
+After `pip install -r requirements.txt`:
+
+```bash
+pytest
+```
+
+Or from the project root: `python -m pytest`. Tests cover CSV parsing and Excel writing in `extract.py` (no API calls).
+
 ## PDF limits and quirks
 
 - **AI path (`extract.py`):** Max **32 MB** per PDF, **100 pages** (Anthropic limit). Larger files are rejected before the API is called.
@@ -170,6 +180,12 @@ So: for **maximum confidentiality and offline use**, use only **`tables_to_excel
 - **Offline path:** No hard size limit; very large PDFs may be slow or run out of memory.
 - **Exit codes:** Scripts exit with **0** on success and **1** on failure (so you can use them in scripts or n8n).
 - **Overwrite:** By default the output file is overwritten. Use `--no-overwrite` with `tables_to_excel.py` to fail if the file already exists.
+
+## Output paths
+
+- **Default:** If you don’t pass `-o`, the Excel file is written next to the PDF with the same name and a `.xlsx` extension (e.g. `report.pdf` → `report.xlsx` in the same folder).
+- **Custom path:** Use `-o path/to/output.xlsx` to choose the file path. The **parent directory is created automatically** if it doesn’t exist.
+- **Overwrite:** Default is to overwrite. Use `--no-overwrite` with `tables_to_excel.py` to avoid overwriting.
 
 ## AI usage (extract.py)
 
