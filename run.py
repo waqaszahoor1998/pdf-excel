@@ -10,6 +10,10 @@ import argparse
 import sys
 from pathlib import Path
 
+def _get_version():
+    p = Path(__file__).resolve().parent / "VERSION"
+    return p.read_text().strip() if p.exists() else "0.0.0"
+
 # Project modules
 from tables_to_excel import pdf_tables_to_excel
 from extract import extract_pdf_to_excel
@@ -96,6 +100,7 @@ def main() -> int:
         epilog="Examples:\n  %(prog)s tables report.pdf\n  %(prog)s tables a.pdf b.pdf\n  %(prog)s ask report.pdf \"taxes for January 2026\"",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    parser.add_argument("--version", action="version", version=_get_version())
     sub = parser.add_subparsers(dest="cmd", required=True, help="Command")
 
     # tables: one or more PDFs

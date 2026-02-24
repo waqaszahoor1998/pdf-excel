@@ -177,6 +177,10 @@ So: for **maximum confidentiality and offline use**, use only **`tables_to_excel
 - **Python 3.10+**
 - For AI step: **Anthropic API key** from [console.anthropic.com](https://console.anthropic.com/)
 
+## Version
+
+Current version is in **`VERSION`** (e.g. `1.1.0`). Show it: `python run.py --version`. When you release, bump the number in `VERSION` and tag (e.g. `v1.2.0`). Minor = new features/fixes; major = breaking changes.
+
 ## Running tests
 
 After `pip install -r requirements.txt`:
