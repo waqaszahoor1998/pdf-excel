@@ -15,10 +15,17 @@ This plan covers everything we need **before and during** building the PDF-to-Ex
 
 ## 1. Project goal (what we’re building)
 
-- **Product:** A PDF-to-Excel converter that supports two modes:
-  1. **Offline (no AI):** Extract all tables from a PDF into one Excel file. Data never leaves the machine.
-  2. **AI agent (Anthropic):** User describes in natural language what to extract (e.g. “company taxes for January 2026”); the system returns only that data as Excel.
-- **Confidentiality:** Offline path = no network. AI path = Anthropic only; data not used for training; sent over HTTPS, retained temporarily. See README “Confidentiality & privacy”.
+We need **two layers**, in order:
+
+**1. Foundation: a PDF-to-Excel converter (backend).**  
+First we build the code that can take a PDF and produce Excel — reading the PDF, extracting table data, writing .xlsx. That’s backend programming: it has to work reliably. Today that’s the offline path (e.g. pdfplumber → all tables → Excel) and the plumbing for “table data → Excel”. This is the base the rest sits on.
+
+**2. End goal: implement the AI agent in that.**  
+Our main product direction is the **AI agent**: the user gives a PDF and says in natural language what they need (e.g. “company taxes for January 2026”); the system figures out *what* to extract and then uses the same converter to produce Excel. So we’re not “AI agent only” from day one — we get a solid PDF→Excel converter first, then we **add** the AI agent on top. The AI agent is the “brain” (Claude) that decides which part of the PDF to extract; the converter is the “engine” that turns that into Excel.
+
+- **Right now:** We have a working converter (offline: all tables → Excel) and an AI path (PDF + query → Claude → table → Excel). We keep improving the converter and the AI integration.
+- **Offline mode:** No AI, no API; extracts all tables. Good for confidentiality or when you don’t want to use the API. Part of the converter foundation.
+- **Confidentiality:** Offline = no network. AI path = Anthropic only; data not used for training; sent over HTTPS, retained only temporarily. See README “Confidentiality & privacy”.
 
 ---
 
@@ -56,12 +63,12 @@ This plan covers everything we need **before and during** building the PDF-to-Ex
 
 ## 3. Who we’re building for (personas)
 
-| Persona | Need | Primary path |
-|--------|------|----------------|
-| **Analyst / ops** | “I have a long PDF and only need one section (e.g. January taxes) in Excel.” | AI agent (natural-language query). |
-| **Compliance / confidential** | “Data must not leave our network.” | Offline only (`tables_to_excel.py`). |
-| **Power user / scripted** | “I want to batch many PDFs or integrate into a pipeline.” | CLI (both paths); later batch and optional API. |
-| **Casual user** | “I want to upload a PDF and get Excel without using the command line.” | Future: web or desktop UI (Phase 5). |
+| Persona | Need | How we serve them |
+|--------|------|-------------------|
+| **Analyst / ops** | “I have a long PDF and only need one section (e.g. January taxes) in Excel.” | **AI agent** (end goal). |
+| **Compliance / confidential** | “Data must not leave our network.” | **Converter offline mode** (no AI, no API). |
+| **Power user / scripted** | “I want to batch many PDFs or integrate into a pipeline.” | CLI (converter + AI agent when ready); later batch and optional API. |
+| **Casual user** | “I want to upload a PDF and get Excel without the command line.” | Future: web or desktop UI (Phase 5) on top of the converter and **AI agent**. |
 
 ---
 
@@ -194,9 +201,18 @@ Only if we want more than CLI.
 |---|------|--------|------|
 | 5.1 | Web UI | Upload PDF, query box (AI path), run, download Excel. Auth/hosting separate. | [ ] |
 | 5.2 | Or local GUI | e.g. Tkinter/PyQt: choose PDF, query, output path, run. | [ ] |
-| 5.3 | Or API | REST/internal API wrapping both extraction paths; auth as needed. | [ ] |
+| 5.3 | Or API | REST/internal API wrapping both extraction paths; auth as needed. Enables **n8n** (and other tools) to call us via HTTP Request node. | [ ] |
 
 **Phase 5 sign-off:** Chosen option works end-to-end and is documented.
+
+---
+
+## 11b. Using n8n (workflow automation)
+
+We can use the converter and AI agent from [n8n](https://n8n.io) in two ways:
+
+- **Execute Command node (self-hosted n8n only):** Run `python tables_to_excel.py ...` or `python extract.py ...` from an n8n workflow. The host/container must have Python and our dependencies; `ANTHROPIC_API_KEY` must be set for the AI path. Execute Command is disabled by default in n8n 2.0+ and not available on n8n Cloud. See README “Using with n8n”.
+- **HTTP API (when we add it):** If we add a REST API (Phase 5), n8n can call it with the HTTP Request node (works with n8n Cloud if the API is reachable).
 
 ---
 

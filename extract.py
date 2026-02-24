@@ -10,9 +10,13 @@ import argparse
 import base64
 import csv
 import io
-import json
+import logging
 import os
+import sys
 from pathlib import Path
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+log = logging.getLogger(__name__)
 
 import anthropic
 from dotenv import load_dotenv
@@ -147,7 +151,7 @@ def extract_pdf_to_excel(
     return output_path
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(
         description="Extract data from a PDF using a natural-language query and save to Excel (via Anthropic API)."
     )
@@ -166,10 +170,30 @@ def main():
     )
     args = parser.parse_args()
 
-    out = args.output or str(Path(args.pdf).with_suffix(".xlsx"))
-    result = extract_pdf_to_excel(args.pdf, args.query, out, model=args.model)
-    print(f"Saved: {result}")
+    try:
+        out = args.output or str(Path(args.pdf).with_suffix(".xlsx"))
+        log.info("PDF: %s | Query: %s | Output: %s", args.pdf, args.query[:50] + "..." if len(args.query) > 50 else args.query, out)
+        result = extract_pdf_to_excel(args.pdf, args.query, out, model=args.model)
+        print(f"Saved: {result}")
+        return 0
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except anthropic.APIError as e:
+        msg = str(e)
+        if "authentication" in msg.lower() or "invalid_api_key" in msg.lower() or "401" in msg:
+            print("Error: Invalid or missing API key. Set ANTHROPIC_API_KEY in .env.", file=sys.stderr)
+        elif "rate" in msg.lower() or "429" in msg:
+            print("Error: API rate limit exceeded. Try again later.", file=sys.stderr)
+        elif "overloaded" in msg.lower() or "503" in msg:
+            print("Error: API temporarily unavailable. Try again later.", file=sys.stderr)
+        else:
+            print(f"Error: API request failed. {msg}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

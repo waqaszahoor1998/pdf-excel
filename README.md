@@ -1,13 +1,27 @@
 # PDF → Excel
 
-Get tabular data from PDFs into Excel. Two ways:
+A **PDF-to-Excel converter** (backend code that reads PDFs and writes Excel). Our **end goal** is to have an **AI agent** on top: you say what you need in plain language (e.g. *“give me the company taxes for January 2026”*) and get that data as Excel. We build the converter first so it works reliably; then the AI agent is the layer that decides *what* to extract and uses the same pipeline to produce Excel.
 
-1. **Start now (no AI)** — Extract all tables from a PDF into one Excel file. No API key, runs locally.
-2. **Later: AI extraction** — Ask in plain language (e.g. *"company taxes for January 2026"*) and get only that part as Excel, via Anthropic.
+**Today:** You can (1) extract all tables from a PDF to Excel (offline, no AI), or (2) use the AI agent: PDF + your prompt → Excel with only the part you asked for.
 
 ---
 
-## Start here: extract all tables (no API key)
+## AI agent: extract what you ask for (end goal)
+
+You provide a PDF and a natural-language prompt. The agent (Claude via Anthropic) finds the matching data and you get an Excel file.
+
+**Setup:** See “How we use Anthropic” below (API key in `.env`). Then:
+
+```bash
+python extract.py path/to/document.pdf "company taxes for January 2026"
+# Creates path/to/document.xlsx with that data
+```
+
+See the rest of this README for more examples, confidentiality, and options.
+
+---
+
+## Converter (offline): extract all tables (no AI, no API key)
 
 **Setup once:**
 
@@ -31,7 +45,7 @@ Optional output path:
 python tables_to_excel.py report.pdf -o output/report.xlsx
 ```
 
-Uses **pdfplumber** to detect tables on each page and write them to Excel. Good for standard PDFs with clear tables; complex or scanned PDFs may need the AI step later.
+Part of the **converter** foundation: uses **pdfplumber**; no API key, no data sent out. Use when you can’t or don’t want to use the AI (e.g. confidentiality). For “give me only this part” use the AI agent above.
 
 ---
 
@@ -148,6 +162,15 @@ So: for **maximum confidentiality and offline use**, use only **`tables_to_excel
 - **Python 3.10+**
 - For AI step: **Anthropic API key** from [console.anthropic.com](https://console.anthropic.com/)
 
+## PDF limits and quirks
+
+- **AI path (`extract.py`):** Max **32 MB** per PDF, **100 pages** (Anthropic limit). Larger files are rejected before the API is called.
+- **Both paths:** **Password-protected or encrypted PDFs** are not supported; you’ll get a clear error.
+- **Both paths:** We target **digital (text-based) PDFs**. Scanned PDFs (image-only) need OCR and are not supported yet.
+- **Offline path:** No hard size limit; very large PDFs may be slow or run out of memory.
+- **Exit codes:** Scripts exit with **0** on success and **1** on failure (so you can use them in scripts or n8n).
+- **Overwrite:** By default the output file is overwritten. Use `--no-overwrite` with `tables_to_excel.py` to fail if the file already exists.
+
 ## AI usage (extract.py)
 
 **CLI:**
@@ -164,8 +187,6 @@ from extract import extract_pdf_to_excel
 extract_pdf_to_excel("report.pdf", "taxes for January 2026", "january_taxes.xlsx")
 ```
 
-**Limits (Anthropic):** Max 32 MB and 100 pages per PDF; standard PDFs only.
-
 **Optional model:**
 
 ```bash
@@ -173,3 +194,34 @@ python extract.py doc.pdf "your query" --model claude-opus-4-6
 ```
 
 Default is `claude-sonnet-4-20250514`.
+
+---
+
+## Using with n8n
+
+You can run the PDF→Excel converter (and AI agent) from [n8n](https://n8n.io) workflows in two ways.
+
+### Option 1: Execute Command node (self-hosted n8n only)
+
+If n8n is **self-hosted** and the host (or container) has **Python + this project’s dependencies** installed:
+
+1. In n8n, add an **Execute Command** node.
+2. Run the script with arguments from the workflow, for example:
+   - **Offline (all tables):**  
+     `python /path/to/pdf-excel/tables_to_excel.py /path/to/input.pdf -o /path/to/output.xlsx`
+   - **AI agent:**  
+     `python /path/to/pdf-excel/extract.py /path/to/input.pdf "{{ $json.query }}" -o /path/to/output.xlsx`
+3. Use workflow data for the PDF path and (for AI) the query — e.g. a previous step saves an uploaded PDF to a file and passes the path; the query can come from a form or trigger.
+4. The Excel file is written to the path you set with `-o`; a later step can attach it to an email, upload to Drive, etc.
+
+**Note:** Execute Command is **not** available on n8n Cloud (security). It must be enabled on self-hosted n8n (disabled by default in n8n 2.0+). The command runs in the n8n process’s environment, so `ANTHROPIC_API_KEY` must be set there for the AI path.
+
+### Option 2: HTTP API (when we add it)
+
+If we add a **REST API** (e.g. Phase 5 “API” option) that accepts a PDF and optional query and returns Excel:
+
+1. In n8n, use an **HTTP Request** node.
+2. Call our API (e.g. `POST /extract` with PDF file + query, or `POST /tables` for offline).
+3. Use the response (e.g. Excel file or download URL) in the next steps.
+
+This works with n8n Cloud as long as the API is reachable (e.g. our server or a tunnel). We don’t have this API yet; it’s planned as an optional Phase 5 item (see PLAN.md).
