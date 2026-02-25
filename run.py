@@ -119,7 +119,14 @@ def main() -> int:
     p_ask.set_defaults(func=cmd_ask)
 
     args = parser.parse_args()
-    return args.func(args)
+    try:
+        return args.func(args)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

@@ -21,6 +21,46 @@ python run.py ask a.pdf b.pdf "sales table"   # same query, multiple PDFs
 
 ---
 
+## First-time setup (use a virtual environment)
+
+Use a **virtual environment** so dependencies stay in the project and don’t install into your system Python:
+
+```bash
+cd pdf-excel
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+To try the converter without your own PDF, generate a sample:
+
+```bash
+python scripts/make_sample_pdf.py    # creates sample_report.pdf
+python run.py tables sample_report.pdf   # creates sample_report.xlsx
+```
+
+---
+
+## Web UI
+
+You can run a **simple web interface**: upload a PDF, choose “All tables” or “Ask AI” with a query, then download the Excel file.
+
+**Run the app** (with your venv activated):
+
+```bash
+flask --app app run
+# or: python app.py
+```
+
+Then open **http://127.0.0.1:5000** in your browser.
+
+- **All tables:** upload a PDF and click “Extract to Excel” — you get every table in one .xlsx (offline, no API key).
+- **Ask AI:** select “Ask AI”, enter what you want (e.g. “company taxes for January 2026”), then extract. Uses **Gemini** (free) if `GEMINI_API_KEY` is set in `.env`, otherwise **Anthropic** if `ANTHROPIC_API_KEY` is set. Get a free Gemini key at [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey).
+
+Max upload size is 40 MB. For production, set `FLASK_SECRET_KEY` and use a proper WSGI server (e.g. gunicorn); auth and hosting are up to you.
+
+---
+
 ## AI agent: extract what you ask for (end goal)
 
 You provide a PDF and a natural-language prompt. The agent (Claude via Anthropic) finds the matching data and you get an Excel file.
@@ -38,16 +78,7 @@ See the rest of this README for more examples, confidentiality, and options.
 
 ## Converter (offline): extract all tables (no AI, no API key)
 
-**Setup once:**
-
-```bash
-cd pdf-excel
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-**Run:**
+Do the **First-time setup** above if you haven’t yet. Then run:
 
 ```bash
 python tables_to_excel.py path/to/your.pdf
@@ -88,15 +119,17 @@ You don’t have to say “in Excel” in the prompt — the agent always return
 
 ## How you use it today vs. future UI
 
-**Right now there is no UI** — only the command line. You run:
+**CLI:** You can run everything from the command line:
 
 ```bash
 python extract.py path/to/document.pdf "I need the company taxes for January 2026"
 ```
 
-and the script writes an Excel file. So the “agent” is already implemented in the backend (PDF + your prompt → Claude → Excel); you’re just talking to it via the terminal.
+and the script writes an Excel file. So the “agent” is already implemented in the backend (PDF + your prompt → Claude → Excel).
 
-**When we add a UI (Phase 5 in the plan),** we can do it in two main ways. Yes — one of them is **exactly like a chat box with an LLM**: you tell the agent what to do in natural language.
+**Web UI:** A simple form (Option A below) is included — run `flask --app app run` and open http://127.0.0.1:5000 to upload a PDF and get Excel. See the “Web UI” section above.
+
+**Further UI options (Phase 5 in the plan)** could include: Yes — one of them is **exactly like a chat box with an LLM**: you tell the agent what to do in natural language.
 
 ### Option A — Simple form (one shot)
 
@@ -116,18 +149,21 @@ So: **the “agent” is already implemented (CLI).** When we add a UI, it can b
 
 ---
 
-## How we use Anthropic (AI agent)
+## Ask AI: Gemini (free) or Anthropic
 
-This project uses **Anthropic’s API** (Claude) for the AI extraction. No other AI provider is required.
+For “Ask AI” you can use either provider. The **Web UI** and **CLI** (`extract.py`) use whichever key you have set.
 
-1. **Get an API key** — [console.anthropic.com](https://console.anthropic.com/) → API keys → Create key.
-2. **Set it in the project** — Copy `.env.example` to `.env` and set:
-   ```bash
-   ANTHROPIC_API_KEY=sk-ant-...
-   ```
-3. **Run the AI extraction** — Use `extract.py` with your PDF and a natural-language query (see below). The script sends the PDF to Claude and writes the extracted table to Excel.
+- **Gemini (free tier)** — Get an API key at [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey). Set `GEMINI_API_KEY` in `.env`. The Web UI uses Gemini when this key is set (no cost for typical usage).
+- **Anthropic (Claude, paid)** — Get a key at [console.anthropic.com](https://console.anthropic.com/). Set `ANTHROPIC_API_KEY` in `.env`. Used for AI extraction when Gemini key is not set.
 
-The key is read from `.env` (never commit `.env`; it’s in `.gitignore`).
+Copy `.env.example` to `.env` and set at least one of:
+
+```bash
+GEMINI_API_KEY=your_gemini_key_here    # free
+# ANTHROPIC_API_KEY=sk-ant-...         # paid
+```
+
+Keys are read from `.env` (never commit `.env`; it’s in `.gitignore`). The **Web UI** prefers Gemini if both are set.
 
 ---
 
@@ -175,7 +211,7 @@ So: for **maximum confidentiality and offline use**, use only **`tables_to_excel
 ## What you need
 
 - **Python 3.10+**
-- For AI step: **Anthropic API key** from [console.anthropic.com](https://console.anthropic.com/)
+- For Ask AI: **Gemini API key** (free) from [aistudio.google.com](https://aistudio.google.com/app/apikey) and/or **Anthropic API key** from [console.anthropic.com](https://console.anthropic.com/)
 
 ## Version
 

@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PDF → Excel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --border: #2d3a4d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-hover: #79b8ff;
+      --success: #3fb950;
+      --error: #f85149;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'DM Sans', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+      line-height: 1.5;
+    }
+    .container {
+      width: 100%;
+      max-width: 480px;
+    }
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin: 0 0 0.25rem 0;
+      letter-spacing: -0.02em;
+    }
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      margin-bottom: 2rem;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.75rem;
+      margin-bottom: 1.5rem;
+    }
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+    .form-group:last-child { margin-bottom: 0; }
+    label {
+      display: block;
+      font-weight: 500;
+      font-size: 0.9rem;
+      margin-bottom: 0.5rem;
+      color: var(--text);
+    }
+    input[type="file"] {
+      width: 100%;
+      padding: 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    input[type="file"]::file-selector-button {
+      margin-right: 0.75rem;
+      padding: 0.35rem 0.65rem;
+      background: var(--border);
+      border: none;
+      border-radius: 6px;
+      color: var(--text);
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .radio-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+    .radio-label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      font-weight: 400;
+    }
+    .radio-label input { width: auto; margin: 0; accent-color: var(--accent); }
+    textarea {
+      width: 100%;
+      min-height: 100px;
+      padding: 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.9rem;
+      resize: vertical;
+    }
+    textarea::placeholder { color: var(--text-muted); }
+    .query-hint {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 0.35rem;
+    }
+    .btn {
+      width: 100%;
+      padding: 0.85rem 1.25rem;
+      font-family: inherit;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: var(--bg);
+    }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .messages { margin-bottom: 1rem; }
+    .flash {
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+    }
+    .flash.error { background: rgba(248, 81, 73, 0.15); color: var(--error); border: 1px solid rgba(248, 81, 73, 0.3); }
+    .flash.success { background: rgba(63, 185, 80, 0.15); color: var(--success); border: 1px solid rgba(63, 185, 80, 0.3); }
+    .limit { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.35rem; }
+    #queryGroup { display: none; }
+    #queryGroup.visible { display: block; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>PDF → Excel</h1>
+    <p class="subtitle">Upload a PDF and get tables as Excel. Use “All tables” or ask for a specific part.</p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="messages">
+          {% for category, message in messages %}
+            <div class="flash {{ category or 'error' }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <form action="{{ url_for('extract') }}" method="post" enctype="multipart/form-data" class="card">
+      <div class="form-group">
+        <label for="pdf">PDF file</label>
+        <input type="file" name="pdf" id="pdf" accept=".pdf" required>
+        <p class="limit">Max {{ max_mb }} MB. Text-based PDFs only (no scanned/image-only).</p>
+      </div>
+
+      <div class="form-group">
+        <label>Mode</label>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" name="mode" value="tables" checked> All tables (offline, no AI)
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="mode" value="ask"> Ask AI — extract only what I describe
+          </label>
+        </div>
+      </div>
+
+      <div class="form-group" id="queryGroup">
+        <label for="query">What do you want to extract?</label>
+        <textarea name="query" id="query" placeholder="e.g. company taxes for January 2026, or sales table from Q3"></textarea>
+        <p class="query-hint">Describe the section or table you need. The AI will find it and put it in Excel.</p>
+      </div>
+
+      <div class="form-group" style="margin-top: 1.25rem;">
+        <button type="submit" class="btn btn-primary" id="submitBtn">Extract to Excel</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    (function() {
+      var modeRadios = document.querySelectorAll('input[name="mode"]');
+      var queryGroup = document.getElementById('queryGroup');
+      var queryInput = document.getElementById('query');
+
+      function toggleQuery() {
+        var ask = document.querySelector('input[name="mode"]:checked').value === 'ask';
+        queryGroup.classList.toggle('visible', ask);
+        if (ask) queryInput.setAttribute('required', 'required');
+        else queryInput.removeAttribute('required');
+      }
+
+      modeRadios.forEach(function(r) { r.addEventListener('change', toggleQuery); });
+      toggleQuery();
+
+      document.querySelector('form').addEventListener('submit', function() {
+        var btn = document.getElementById('submitBtn');
+        btn.disabled = true;
+        btn.textContent = 'Extracting…';
+      });
+    })();
+  </script>
+</body>
+</html>
