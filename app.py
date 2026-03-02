@@ -1,29 +1,35 @@
 #!/usr/bin/env python3
 """
-Web UI for PDF → Excel.
+Web UI for PDF → Excel (local only, no cloud LLM).
 
 Run: flask --app app run
 Or:  python app.py
 
-Then open http://127.0.0.1:5000 — upload a PDF, choose "All tables" or "Ask AI" with a query, get Excel.
+Then open http://127.0.0.1:5000 — upload a PDF, get all tables as Excel.
+Extraction uses pdfplumber only; no raw data is sent to any cloud service.
 """
 
+import logging
 import os
 import tempfile
 from pathlib import Path
 
+from dotenv import load_dotenv
 from flask import Flask, render_template, request, send_file, flash, redirect, url_for
 from werkzeug.exceptions import RequestEntityTooLarge
 
-# Import after we're in the app directory
+_env_path = Path(__file__).resolve().parent / ".env"
+load_dotenv(_env_path)
+log = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
+
 from tables_to_excel import pdf_tables_to_excel
-from extract import extract_pdf_to_excel as extract_pdf_to_excel_anthropic
-from extract_gemini import extract_pdf_to_excel as extract_pdf_to_excel_gemini
+from pdf_to_qb import pdf_to_qb_excel
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-in-production")
 
-# Max upload: 32 MB for AI path; allow slightly more for tables-only (we'll check in extract)
+# Max upload size for PDFs
 APP_ROOT = Path(__file__).resolve().parent
 MAX_CONTENT_LENGTH = 40 * 1024 * 1024  # 40 MB
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
@@ -47,11 +53,13 @@ def index():
 @app.route("/extract", methods=["POST"])
 def extract():
     if "pdf" not in request.files:
+        log.warning("extract: no file in request")
         flash("No file selected.")
         return redirect(url_for("index"))
 
     file = request.files["pdf"]
     if not file or file.filename == "":
+        log.warning("extract: empty filename")
         flash("No file selected.")
         return redirect(url_for("index"))
 
@@ -59,39 +67,24 @@ def extract():
         flash("Please upload a PDF file.")
         return redirect(url_for("index"))
 
-    mode = request.form.get("mode", "tables")
-    query = (request.form.get("query") or "").strip()
-
-    if mode == "ask" and not query:
-        flash("For “Ask AI”, please enter what you want to extract (e.g. “company taxes for January 2026”).")
-        return redirect(url_for("index"))
-
     tmp_dir = None
     try:
         tmp_dir = tempfile.mkdtemp()
         pdf_path = Path(tmp_dir) / "upload.pdf"
         file.save(str(pdf_path))
+        log.info("extract: saved upload (local only)")
 
         out_path = Path(tmp_dir) / "output.xlsx"
-
-        if mode == "tables":
-            result = pdf_tables_to_excel(str(pdf_path), str(out_path), overwrite=True)
-        else:
-            # Prefer Gemini (free tier) if key is set; otherwise Anthropic
-            if os.environ.get("GEMINI_API_KEY"):
-                result = extract_pdf_to_excel_gemini(str(pdf_path), query, str(out_path))
-            elif os.environ.get("ANTHROPIC_API_KEY"):
-                result = extract_pdf_to_excel_anthropic(str(pdf_path), query, str(out_path))
-            else:
-                flash("For “Ask AI”, set GEMINI_API_KEY (free at aistudio.google.com) or ANTHROPIC_API_KEY in .env.")
-                return redirect(url_for("index"))
+        result = pdf_to_qb_excel(str(pdf_path), str(out_path), overwrite=True)
 
         if not Path(result).exists():
+            log.error("extract: result file missing %s", result)
             flash("Conversion produced no file.")
             return redirect(url_for("index"))
 
         base_name = Path(file.filename).stem
         download_name = f"{base_name}.xlsx"
+        log.info("extract: sending file %s", download_name)
         return send_file(
             result,
             as_attachment=True,
@@ -99,19 +92,16 @@ def extract():
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     except FileNotFoundError as e:
+        log.exception("extract: FileNotFoundError")
         flash(str(e))
         return redirect(url_for("index"))
     except ValueError as e:
+        log.exception("extract: ValueError")
         flash(str(e))
         return redirect(url_for("index"))
     except Exception as e:
-        msg = str(e).lower()
-        if "401" in msg or "auth" in msg or "api key" in msg or "invalid" in msg:
-            flash("Invalid or missing API key. Set GEMINI_API_KEY (free) or ANTHROPIC_API_KEY in .env for “Ask AI”.")
-        elif "429" in msg or "rate" in msg:
-            flash("API rate limit exceeded. Try again later.")
-        else:
-            flash(f"Error: {e}")
+        log.exception("extract: %s", e)
+        flash(f"Error: {e}")
         return redirect(url_for("index"))
     finally:
         if tmp_dir and Path(tmp_dir).exists():

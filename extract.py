@@ -10,6 +10,7 @@ import argparse
 import base64
 import csv
 import io
+import json
 import logging
 import os
 import sys
@@ -100,12 +101,31 @@ def csv_to_excel(csv_content: str, out_path: str) -> None:
     wb.save(out_path)
 
 
+def json_sections_to_excel(sections: list[dict], out_path: str) -> None:
+    """Write structured sections (name, headers, rows) to Excel, one sheet per section."""
+    if not sections:
+        raise ValueError("No sections to write")
+    wb = Workbook()
+    wb.remove(wb.active)
+    for idx, sec in enumerate(sections):
+        name = (sec.get("name") or f"Section_{idx + 1}").replace("\\", "").replace("/", "").replace("*", " ").replace("?", "").replace("[", "").replace("]", "")[:31]
+        headers = sec.get("headers") or []
+        rows = sec.get("rows") or []
+        ws = wb.create_sheet(title=name or f"Sheet{idx + 1}")
+        if headers:
+            ws.append(headers)
+        for r in rows:
+            ws.append(r if isinstance(r, list) else [r])
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    wb.save(out_path)
+
+
 def extract_pdf_to_excel(
     pdf_path: str,
     user_query: str,
     output_path: str,
     api_key: str | None = None,
-    model: str = "claude-sonnet-4-20250514",
+    model: str | None = None,
 ) -> str:
     """
     Extract data from PDF per user query using Anthropic API and save as Excel.
@@ -115,6 +135,7 @@ def extract_pdf_to_excel(
     api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise ValueError("Set ANTHROPIC_API_KEY in .env or pass api_key=...")
+    model = model or os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
 
     pdf_b64 = load_pdf_base64(pdf_path)
     log.info("Calling API…")
@@ -167,8 +188,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--model",
-        default="claude-sonnet-4-20250514",
-        help="Anthropic model (default: claude-sonnet-4-20250514)",
+        default="claude-3-5-sonnet-20241022",
+        help="Anthropic model (default: claude-3-5-sonnet-20241022, or set ANTHROPIC_MODEL in .env)",
     )
     args = parser.parse_args()
 
