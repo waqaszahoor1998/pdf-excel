@@ -149,7 +149,7 @@
 <body>
   <div class="container">
     <h1>PDF → Excel</h1>
-    <p class="subtitle">Upload a PDF and get all tables as Excel. Extraction runs locally — no data is sent to any cloud or AI service.</p>
+    <p class="subtitle">Upload a PDF and get QB-format Excel (clean sheets, structured layout) or use Ask AI to extract specific data.</p>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -171,7 +171,28 @@
         </p>
       </div>
 
-      <p class="query-hint" style="margin-bottom: 1rem;">Runs locally (no data sent to the cloud). Tables are grouped into sheets like Account Summary, Asset Allocation, Portfolio Activity, Tax Summary, and per-account sheets.</p>
+      <div class="form-group">
+        <label>Mode</label>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" name="mode" value="offline" id="modeOffline" checked>
+            Extract to QB format — local only, no API. Tables and sections become clean sheets (Account Summary, Asset Allocation, etc.).
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="mode" value="ai" id="modeAi" {% if not ai_available %}disabled{% endif %}>
+            Ask AI — natural-language query (requires API key)
+            {% if not ai_available %}<span class="query-hint">(set ANTHROPIC_API_KEY in .env)</span>{% endif %}
+          </label>
+        </div>
+      </div>
+
+      <div class="form-group" id="queryGroup" style="display: none;">
+        <label for="query">What to extract</label>
+        <textarea name="query" id="query" placeholder="e.g. taxes for January 2026, or the summary table from page 3" rows="3"></textarea>
+        <p class="query-hint">The PDF is sent to Anthropic (Claude) to extract only what you ask for.</p>
+      </div>
+
+      <p class="query-hint" id="offlineHint" style="margin-bottom: 0.5rem;">QB format: one sheet per section with merged Account Summary, PLSummary-style layout, and per-account sheets.</p>
 
       <div class="form-group" style="margin-top: 1.25rem;">
         <button type="submit" class="btn btn-primary" id="submitBtn">Extract to Excel</button>
@@ -201,9 +222,25 @@
         });
       }
 
+      var modeOffline = document.getElementById('modeOffline');
+      var modeAi = document.getElementById('modeAi');
+      var queryGroup = document.getElementById('queryGroup');
+      var queryInput = document.getElementById('query');
+      var offlineHint = document.getElementById('offlineHint');
+
+      function updateModeUI() {
+        var isAi = modeAi && modeAi.checked;
+        if (queryGroup) queryGroup.style.display = isAi ? 'block' : 'none';
+        if (offlineHint) offlineHint.style.display = isAi ? 'none' : 'block';
+        if (queryInput) queryInput.required = isAi;
+      }
+      if (modeOffline) modeOffline.addEventListener('change', updateModeUI);
+      if (modeAi) modeAi.addEventListener('change', updateModeUI);
+      updateModeUI();
+
       form.addEventListener('submit', function() {
         submitBtn.disabled = true;
-        submitBtn.textContent = 'Extracting…';
+        submitBtn.textContent = document.getElementById('modeAi').checked ? 'Calling API…' : 'Extracting…';
       });
     })();
   </script>

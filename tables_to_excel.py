@@ -6,6 +6,7 @@ Part of the converter foundation. Use extract.py for the AI agent (natural-langu
 """
 
 import argparse
+import json
 import logging
 import re
 import sys
@@ -80,18 +81,51 @@ def _preferred_sheet_name_from_title(text: str) -> str | None:
 
 
 def _cell_value(c) -> str | int | float:
-    """Prefer numeric type for Excel (so calculations work); otherwise return cleaned string."""
+    """
+    Prefer numeric type for Excel (so calculations work); otherwise return cleaned string.
+    Strips $ € £ and commas; handles trailing %; parenthetical negatives (123.45); rounds to 2 decimals.
+    """
     if c is None:
         return ""
+    if isinstance(c, (int, float)) and not isinstance(c, bool):
+        return round(c, 2) if isinstance(c, float) and c != int(c) else c
     s = str(c).strip()
     if not s:
         return ""
+    # Parenthetical negative: (308.60) or ($37,303.03)
+    if s.startswith("(") and s.endswith(")"):
+        inner = s[1:-1].strip().lstrip("$€£\u00a0").replace(",", "")
+        try:
+            val = float(inner)
+            return round(-val, 2) if abs(val) >= 0.01 or val == 0 else -val
+        except ValueError:
+            pass
+    # "09 $24,157,595.24" or "24 $24,284,278.98" -> take the dollar amount part only
+    m = re.match(r"^\d+\s+[\$€£]?\s*([\d,]+\.?\d*)\s*$", s)
+    if m:
+        try:
+            val = float(m.group(1).replace(",", ""))
+            return round(val, 2) if abs(val) >= 0.01 or val == 0 else val
+        except ValueError:
+            pass
+    # Strip currency symbols and commas for parsing
+    is_pct = s.endswith("%")
+    if is_pct:
+        s = s[:-1].strip()
+    clean = s.lstrip("$€£\u00a0").replace(",", "")
     try:
-        if "." in s or "e" in s.lower():
-            return float(s)
-        return int(s)
+        if "." in clean or "e" in clean.lower():
+            val = float(clean)
+            if is_pct:
+                val = val / 100.0
+            if abs(val) >= 0.01 or val == 0:
+                val = round(val, 2)
+            return val
+        if clean.isdigit() or (clean.startswith("-") and clean[1:].isdigit()):
+            return int(clean)
     except ValueError:
-        return s
+        pass
+    return s
 
 
 def _merge_fragmented_row(cells: list) -> list:
@@ -99,7 +133,8 @@ def _merge_fragmented_row(cells: list) -> list:
     Merge cells that are fragments of one value so numbers and headers stay in one cell.
     - "15,088,442.", "61" -> "15,088,442.61"
     - "22,913,59", "5.63" -> "22,913,595.63"
-    - "Beginni", "ng" -> "Beginning"
+    - "Beginni", "n", "g" -> "Beginning"
+    - "1,421,910.", "03 1,494,773.17" -> "1,421,910.03", "1,494,773.17"
     """
     if not cells:
         return []
@@ -121,9 +156,25 @@ def _merge_fragmented_row(cells: list) -> list:
             if last.endswith(".") and re.match(r"^\d+$", s):
                 out[-1] = last + s
                 continue
-            # Merge decimal part in next cell: last ends with digits (maybe comma-sep, optional $) and current is .dd or d.dd
-            # e.g. "22,913,59" + "5.63" -> 22913595.63; "$24,157,59" + "5.24" -> 24157595.24
-            if re.search(r"[\d,]+$", last) and re.match(r"^\d*\.?\d+$", s):
+            # Last ends with "." and current is "DD next_number" (e.g. "03 1,494,773.17"): merge DD, then append next_number
+            if last.endswith(".") and re.match(r"^\d+\s+[\d,]+", s):
+                m = re.match(r"^(\d+)\s+(.+)$", s)
+                if m:
+                    dec_part, rest = m.group(1), m.group(2).strip()
+                    out[-1] = last + dec_part
+                    # Push rest as new value (may be number like "1,494,773.17")
+                    try:
+                        rest_clean = rest.replace(",", "").lstrip("$€£")
+                        if "." in rest_clean or re.search(r"\d", rest_clean):
+                            out.append(float(rest_clean) if "." in rest_clean else int(rest_clean))
+                        else:
+                            out.append(rest)
+                    except ValueError:
+                        out.append(rest)
+                    continue
+            # Merge decimal part in next cell: last ends with digits and current is short .dd or d.dd (not a full amount)
+            # e.g. "22,913,59" + "5.63" -> 22913595.63; avoid "24044839" + "924157595.24" -> one huge number
+            if re.search(r"[\d,]+$", last) and re.match(r"^\d*\.?\d+$", s) and len(s) <= 8:
                 try:
                     clean_last = last.replace(",", "").lstrip("$€£")
                     combined = clean_last + s
@@ -134,8 +185,9 @@ def _merge_fragmented_row(cells: list) -> list:
                 except ValueError:
                     out.append(s)
                 continue
-            # Merge word fragments: last ends with letter (4+ chars), current is 2–4 letters only (e.g. "Beginni" + "ng")
-            if len(last) >= 4 and last[-1].isalpha() and re.match(r"^[a-zA-Z]{2,4}$", s):
+            # Merge word fragments: last ends with letter (4+ chars), current is 1–2 letters only (e.g. "Beginni" + "n" + "g")
+            # Use 1–2 so we get "Beginning" from "Beginni"+"n"+"g" but not "Beginning"+"Endi" -> "BeginningEnding"
+            if len(last) >= 4 and last[-1].isalpha() and re.match(r"^[a-zA-Z]{1,2}$", s):
                 out[-1] = last + s
                 continue
         out.append(s)
@@ -148,6 +200,12 @@ def _drop_empty_rows(rows: list[list]) -> list[list]:
         row for row in rows
         if any(c is not None and str(c).strip() != "" for c in (row if isinstance(row, (list, tuple)) else [row]))
     ]
+
+
+def _clean_table_rows(rows: list) -> list[list]:
+    """Apply merge of fragmented cells and drop empty rows. Use for all table row sources."""
+    merged = [_merge_fragmented_row(list(r) if isinstance(r, (list, tuple)) else [r]) for r in rows]
+    return _drop_empty_rows(merged)
 
 
 def _split_table_by_section_titles(rows: list[list]) -> list[tuple[str, list[list]]]:
@@ -195,10 +253,6 @@ def _page_sections_with_headings(page, page_num: int):
     text_lines = page.extract_text_lines() or []
     find_tables_kw = {"table_settings": TABLE_SETTINGS} if hasattr(page, "find_tables") else {}
     tables = page.find_tables(**find_tables_kw) if hasattr(page, "find_tables") else []
-
-    def _clean_table_rows(rows):
-        merged = [_merge_fragmented_row(list(r) if isinstance(r, (list, tuple)) else [r]) for r in rows]
-        return _drop_empty_rows(merged)
 
     # Build list of (top, kind, payload): "text" -> line dict, "table" -> (bbox, rows)
     elements = []
@@ -276,13 +330,14 @@ def _page_sections_with_headings(page, page_num: int):
             line = text_lines_sorted[i]
             gap = line["top"] - (text_lines_sorted[i - 1]["bottom"])
             if gap > SECTION_GAP_PT and group:
-                # Flush group: first line = heading, rest = rows (split on 2+ spaces)
+                # Flush group: first line = heading, rest = rows (split on 2+ spaces); then merge fragments
                 heading = group[0]
                 section_idx += 1
                 rows = []
                 for g in group[1:]:
                     parts = re.split(r"[\t ]{2,}", g)
                     rows.append(parts if len(parts) > 1 else [g])
+                rows = _clean_table_rows(rows)
                 yield (_safe_sheet_name(heading[:28] + f"_{section_idx}", section_idx), [heading], rows)
                 group = []
             group.append(line["text"])
@@ -293,6 +348,7 @@ def _page_sections_with_headings(page, page_num: int):
             for g in group[1:]:
                 parts = re.split(r"[\t ]{2,}", g)
                 rows.append(parts if len(parts) > 1 else [g])
+            rows = _clean_table_rows(rows)
             yield (_safe_sheet_name(heading[:28] + f"_{section_idx}", section_idx), [heading], rows)
 
 
@@ -474,21 +530,11 @@ def _write_section_to_sheet(ws, sec_name: str, heading_rows: list, data_rows: li
     return row_num
 
 
-def pdf_tables_to_excel(
-    pdf_path: str,
-    output_path: str | None = None,
-    overwrite: bool = True,
-    single_sheet: bool = False,
-) -> str:
+def extract_sections_from_pdf(pdf_path: str) -> list[tuple[str, list, list]]:
     """
-    Extract every table from the PDF and write to one Excel file.
-
-    By default (single_sheet=False), creates one sheet per section so each sheet mirrors
-    the PDF: a section title, optional summary (key-value lines as a 2-column table),
-    then the main data table with header row and columns. Organized and readable.
-
-    If single_sheet=True, writes one sheet "Extracted" with all sections in that same
-    format (title, summary, table, blank rows, next section...).
+    Extract all tables/sections from the PDF in document order.
+    Returns list of (section_name, heading_rows, data_rows).
+    Same structure used for Excel and JSON; no file is written.
     """
     pdf_path = Path(pdf_path)
     if not pdf_path.exists():
@@ -496,69 +542,44 @@ def pdf_tables_to_excel(
     if pdf_path.suffix.lower() != ".pdf":
         raise ValueError("File must be a .pdf")
 
-    out = Path(output_path or pdf_path.with_suffix(".xlsx"))
-    if out.exists() and not overwrite:
-        raise FileExistsError(f"Output exists (use --overwrite to replace): {out}")
-
-    out.parent.mkdir(parents=True, exist_ok=True)
-
-    # Collect all sections in document order: (section_name, heading_rows, data_rows)
     sections = []
-    try:
-        with pdfplumber.open(pdf_path) as pdf:
-            total_pages = len(pdf.pages)
-            for page_num, page in enumerate(pdf.pages, start=1):
-                if total_pages > 1:
-                    log.info("Page %d/%d", page_num, total_pages)
-                used_sections = False
-                if hasattr(page, "extract_text_lines"):
-                    for sec_name, heading_rows, data_rows in _page_sections_with_headings(page, page_num):
-                        sections.append((sec_name, heading_rows, [_normalize_row(r) for r in data_rows]))
-                        used_sections = True
-                if not used_sections:
-                    tables = page.extract_tables()
-                    if tables:
-                        for i, table in enumerate(tables):
-                            if not table:
-                                continue
-                            name = f"Page{page_num}" if len(tables) == 1 else f"Page{page_num}_T{i+1}"
-                            # Section heading = table title; table = all rows (first row is column headers, rest data)
-                            heading_rows = [name]
-                            data_rows = [_normalize_row(r) for r in table]
-                            sections.append((name, heading_rows, data_rows))
+    with pdfplumber.open(pdf_path) as pdf:
+        total_pages = len(pdf.pages)
+        for page_num, page in enumerate(pdf.pages, start=1):
+            if total_pages > 1:
+                log.info("Page %d/%d", page_num, total_pages)
+            used_sections = False
+            if hasattr(page, "extract_text_lines"):
+                for sec_name, heading_rows, data_rows in _page_sections_with_headings(page, page_num):
+                    sections.append((sec_name, heading_rows, [_normalize_row(r) for r in data_rows]))
+                    used_sections = True
+            if not used_sections:
+                tables = page.extract_tables()
+                if tables:
+                    for i, table in enumerate(tables):
+                        if not table:
+                            continue
+                        name = f"Page{page_num}" if len(tables) == 1 else f"Page{page_num}_T{i+1}"
+                        heading_rows = [name]
+                        cleaned = _clean_table_rows(table)
+                        data_rows = [_normalize_row(r) for r in cleaned]
+                        sections.append((name, heading_rows, data_rows))
+                else:
+                    text = page.extract_text()
+                    if text and text.strip():
+                        lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
+                        if lines:
+                            heading = lines[0]
+                            rows = []
+                            for line in lines[1:]:
+                                parts = re.split(r"[\t ]{2,}", line)
+                                rows.append(parts if len(parts) > 1 else [line])
+                            rows = _clean_table_rows(rows)
+                            data_rows = [_normalize_row(r) for r in rows]
+                            sections.append((f"Page{page_num}", [heading], data_rows))
                     else:
-                        text = page.extract_text()
-                        if text and text.strip():
-                            lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
-                            if lines:
-                                # First line as heading, rest as table (split on 2+ spaces/tabs)
-                                heading = lines[0]
-                                rows = []
-                                for line in lines[1:]:
-                                    parts = re.split(r"[\t ]{2,}", line)
-                                    rows.append([_cell_value(p) for p in (parts if len(parts) > 1 else [line])])
-                                sections.append((f"Page{page_num}", [heading], rows))
-                        else:
-                            sections.append((f"Page{page_num}", ["(No text extracted from this page)"], []))
-    except Exception as e:
-        msg = str(e).lower()
-        if "password" in msg or "encrypted" in msg:
-            raise ValueError("PDF appears password-protected or encrypted; not supported.") from e
-        if "invalid" in msg or "cannot read" in msg or "failed" in msg:
-            raise ValueError("PDF could not be read (corrupt or invalid file).") from e
-        raise
+                        sections.append((f"Page{page_num}", ["(No text extracted from this page)"], []))
 
-    wb = Workbook()
-    wb.remove(wb.active)
-
-    if not sections:
-        ws = wb.create_sheet(title="Info")
-        ws.append(["No content could be extracted from this PDF (empty or unsupported)."])
-        wb.save(out)
-        log.info("Wrote 1 sheet to %s", out)
-        return str(out)
-
-    # Drop sections with no table data (avoids useless "(No table data)" sheets); fold their titles into the next section
     def _section_has_data(data_rows):
         if not data_rows:
             return False
@@ -581,12 +602,156 @@ def pdf_tables_to_excel(
             heading_rows = [pending_title, *heading_rows]
             pending_title = None
         merged.append((sec_name, heading_rows, data_rows))
-    sections = merged
+    return merged
+
+
+def _cell_to_json(c):
+    """One cell to a JSON-safe value."""
+    if c is None:
+        return None
+    if isinstance(c, (int, float)) and not isinstance(c, bool):
+        return c
+    s = str(c).strip()
+    return s if s else None
+
+
+def _build_header_grid(rows: list[list]) -> dict | None:
+    """
+    Build row/column header view from a table: first row = column_headers, first column = row_headers.
+    Returns { "column_headers": [...], "row_headers": [...], "data": [[...], ...] } so that
+    value at (row_headers[i], column_headers[j]) = data[i][j]. Enables (x, y) lookup by heading names.
+    """
+    if not rows or len(rows) < 2:
+        return None
+    first_row = rows[0]
+    col_headers = [_cell_to_json(c) for c in (first_row if isinstance(first_row, (list, tuple)) else [first_row])]
+    if not col_headers or all(c is None or (isinstance(c, str) and not c.strip()) for c in col_headers):
+        return None
+    row_headers = []
+    data = []
+    for r in rows[1:]:
+        row = r if isinstance(r, (list, tuple)) else [r]
+        row_headers.append(_cell_to_json(row[0]) if row else None)
+        data.append([_cell_to_json(row[j]) if j < len(row) else None for j in range(1, len(col_headers) + 1)])
+    return {"column_headers": col_headers, "row_headers": row_headers, "data": data}
+
+
+def _sections_to_json_serializable(sections: list[tuple]) -> list[dict]:
+    """Turn (name, heading_rows, data_rows) into list of dicts safe for JSON (no tuples, consistent types)."""
+    out = []
+    for sec_name, heading_rows, data_rows in sections:
+        # Headings: list of strings (first line can be section title)
+        headings = []
+        for h in (heading_rows or []):
+            if isinstance(h, (list, tuple)):
+                headings.append(" ".join(str(x) for x in h if x is not None))
+            else:
+                headings.append(str(h) if h is not None else "")
+        # Rows: list of lists; cells as numbers or strings
+        rows = []
+        for r in (data_rows or []):
+            row = r if isinstance(r, (list, tuple)) else [r]
+            cells = [_cell_to_json(c) for c in row]
+            rows.append(cells)
+        section_dict = {"name": str(sec_name), "headings": headings, "rows": rows}
+        # Grid size for verification: how many rows/columns were extracted
+        section_dict["row_count"] = len(rows)
+        section_dict["column_count"] = len(rows[0]) if rows else 0
+        # Add header-grid view for (row_heading, column_heading) → value lookup
+        # Canonical key is (row_index, column_index); headers are labels and may repeat
+        grid = _build_header_grid(rows)
+        if grid:
+            section_dict["column_headers"] = grid["column_headers"]
+            section_dict["row_headers"] = grid["row_headers"]
+            section_dict["data"] = grid["data"]
+        out.append(section_dict)
+    return out
+
+
+def _write_json_from_sections(sections: list[tuple], out: Path, overwrite: bool = True) -> None:
+    """Write sections to a JSON file (used for one-stream Excel + JSON output)."""
+    if out.exists() and not overwrite:
+        return
+    out.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"sections": _sections_to_json_serializable(sections)}
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    log.info("Wrote %d section(s) to %s", len(sections), out)
+
+
+def pdf_to_json(
+    pdf_path: str,
+    output_path: str | None = None,
+    overwrite: bool = True,
+) -> str:
+    """
+    Extract all tables/sections from the PDF and write them to a JSON file.
+    Structure: { "sections": [ { "name": "...", "headings": [...], "rows": [[...], ...] }, ... ] }
+    Same data as Excel, so you can edit/filter the JSON then convert to Excel or QB format later.
+    """
+    pdf_path = Path(pdf_path)
+    out = Path(output_path or pdf_path.with_suffix(".json"))
+    if out.exists() and not overwrite:
+        raise FileExistsError(f"Output exists (use --overwrite to replace): {out}")
+
+    sections = extract_sections_from_pdf(pdf_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    _write_json_from_sections(sections, out, overwrite)
+    return str(out)
+
+
+def pdf_tables_to_excel(
+    pdf_path: str,
+    output_path: str | None = None,
+    overwrite: bool = True,
+    single_sheet: bool = False,
+    write_json: bool = False,
+    json_path: str | Path | None = None,
+) -> str:
+    """
+    Extract every table from the PDF and write to one Excel file.
+
+    By default (single_sheet=False), creates one sheet per section so each sheet mirrors
+    the PDF: a section title, optional summary (key-value lines as a 2-column table),
+    then the main data table with header row and columns. Organized and readable.
+
+    If single_sheet=True, writes one sheet "Extracted" with all sections in that same
+    format (title, summary, table, blank rows, next section...).
+
+    If write_json=True and json_path is set, writes the same extraction to a JSON file
+    (one stream: one extraction → Excel + JSON).
+    """
+    pdf_path = Path(pdf_path)
+    if not pdf_path.exists():
+        raise FileNotFoundError(f"Not found: {pdf_path}")
+    if pdf_path.suffix.lower() != ".pdf":
+        raise ValueError("File must be a .pdf")
+
+    out = Path(output_path or pdf_path.with_suffix(".xlsx"))
+    if out.exists() and not overwrite:
+        raise FileExistsError(f"Output exists (use --overwrite to replace): {out}")
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        sections = extract_sections_from_pdf(pdf_path)
+    except Exception as e:
+        msg = str(e).lower()
+        if "password" in msg or "encrypted" in msg:
+            raise ValueError("PDF appears password-protected or encrypted; not supported.") from e
+        if "invalid" in msg or "cannot read" in msg or "failed" in msg:
+            raise ValueError("PDF could not be read (corrupt or invalid file).") from e
+        raise
+
+    wb = Workbook()
+    wb.remove(wb.active)
 
     if not sections:
         ws = wb.create_sheet(title="Info")
         ws.append(["No tables or structured data could be extracted from this PDF."])
         wb.save(out)
+        if write_json and json_path:
+            _write_json_from_sections([], Path(json_path), overwrite)
         log.info("Wrote 1 sheet to %s", out)
         return str(out)
 
@@ -616,6 +781,8 @@ def pdf_tables_to_excel(
         sheet_count = len(sections)
 
     wb.save(out)
+    if write_json and json_path:
+        _write_json_from_sections(sections, Path(json_path), overwrite)
     log.info("Wrote %d sheet(s) to %s", sheet_count, out)
     return str(out)
 

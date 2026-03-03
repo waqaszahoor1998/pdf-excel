@@ -2,7 +2,8 @@
 """
 Single entry point for PDF → Excel.
 
-  python run.py tables <pdf> [pdf2 ...]   Extract all tables (no AI). Batch: multiple PDFs → multiple Excel files.
+  python run.py tables <pdf> [pdf2 ...]   Extract all tables to QB-format Excel. Batch: multiple PDFs → multiple .xlsx.
+  python run.py json <pdf> [pdf2 ...]     Extract PDF to JSON first (sections + rows); then you can convert to Excel.
   python run.py ask <pdf> <query>         AI agent: extract what you ask for. Optional: multiple PDFs with same query.
 """
 
@@ -15,7 +16,7 @@ def _get_version():
     return p.read_text().strip() if p.exists() else "0.0.0"
 
 # Project modules
-from tables_to_excel import pdf_tables_to_excel
+from tables_to_excel import pdf_tables_to_excel, pdf_to_json
 from extract import extract_pdf_to_excel
 import anthropic
 
@@ -38,6 +39,17 @@ def _expand_pdfs(paths):
     return out
 
 
+def _default_output_dir():
+    """Default output directory (e.g. output/). Can be overridden via OUTPUT_DIR in .env."""
+    try:
+        from dotenv import load_dotenv
+        import os
+        load_dotenv()
+        return os.environ.get("OUTPUT_DIR", "output")
+    except Exception:
+        return "output"
+
+
 def cmd_tables(args) -> int:
     overwrite = not args.no_overwrite
     pdfs = _expand_pdfs(args.pdfs)
@@ -47,12 +59,47 @@ def cmd_tables(args) -> int:
     if args.output and len(pdfs) > 1:
         print("Error: -o/--output only allowed for a single PDF.", file=sys.stderr)
         return 1
+    default_dir = _default_output_dir()
     for i, pdf in enumerate(pdfs):
-        out = args.output if len(pdfs) == 1 and args.output else None
+        if args.output and len(pdfs) == 1:
+            out = args.output
+        else:
+            out = str(Path(default_dir) / Path(pdf).with_suffix(".xlsx").name)
         if len(pdfs) > 1:
             print(f"[{i+1}/{len(pdfs)}] {pdf}")
         try:
-            result = pdf_tables_to_excel(str(pdf), out, overwrite=overwrite)
+            out_path = Path(out)
+            result = pdf_tables_to_excel(
+                str(pdf),
+                out,
+                overwrite=overwrite,
+                write_json=True,
+                json_path=out_path.with_suffix(".json"),
+            )
+            print(f"Saved: {result}")
+            if out_path.with_suffix(".json").exists():
+                print(f"Saved: {out_path.with_suffix('.json')}")
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+    return 0
+
+
+def cmd_json(args) -> int:
+    pdfs = _expand_pdfs(args.pdfs)
+    if not pdfs:
+        print("Error: No PDF files found.", file=sys.stderr)
+        return 1
+    if args.output and len(pdfs) > 1:
+        print("Error: -o/--output only allowed for a single PDF.", file=sys.stderr)
+        return 1
+    default_dir = _default_output_dir()
+    for i, pdf in enumerate(pdfs):
+        out = args.output if (args.output and len(pdfs) == 1) else str(Path(default_dir) / Path(pdf).with_suffix(".json").name)
+        if len(pdfs) > 1:
+            print(f"[{i+1}/{len(pdfs)}] {pdf}")
+        try:
+            result = pdf_to_json(str(pdf), out, overwrite=not args.no_overwrite)
             print(f"Saved: {result}")
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
@@ -68,16 +115,18 @@ def cmd_ask(args) -> int:
     if args.output and len(pdfs) > 1:
         print("Error: -o/--output only allowed for a single PDF.", file=sys.stderr)
         return 1
+    default_dir = _default_output_dir()
     for i, pdf in enumerate(pdfs):
-        out = args.output
-        if not out and len(pdfs) == 1:
-            out = str(Path(pdf).with_suffix(".xlsx"))
-        elif not out:
-            out = str(Path(pdf).with_suffix(".xlsx"))
+        if args.output and len(pdfs) == 1:
+            out = args.output
+        else:
+            out = str(Path(default_dir) / Path(pdf).with_suffix(".xlsx").name)
         if len(pdfs) > 1:
             print(f"[{i+1}/{len(pdfs)}] {pdf}")
         try:
-            result = extract_pdf_to_excel(str(pdf), args.query, out, model=args.model)
+            from config import load_config
+            cfg = load_config()
+            result = extract_pdf_to_excel(str(pdf), args.query, out, model=args.model, config=cfg)
             print(f"Saved: {result}")
         except anthropic.APIError as e:
             msg = str(e).lower()
@@ -109,6 +158,12 @@ def main() -> int:
     p_tables.add_argument("-o", "--output", default=None, help="Output .xlsx path (single PDF only)")
     p_tables.add_argument("--no-overwrite", action="store_true", help="Do not overwrite existing output")
     p_tables.set_defaults(func=cmd_tables)
+
+    p_json = sub.add_parser("json", help="Extract PDF to JSON (sections + rows); easy to edit, then convert to Excel")
+    p_json.add_argument("pdfs", nargs="+", help="PDF file(s) or directory containing PDFs")
+    p_json.add_argument("-o", "--output", default=None, help="Output .json path (single PDF only)")
+    p_json.add_argument("--no-overwrite", action="store_true", help="Do not overwrite existing output")
+    p_json.set_defaults(func=cmd_json)
 
     # ask: PDF(s) + query
     p_ask = sub.add_parser("ask", help="AI agent: extract what you ask for from PDF(s)")

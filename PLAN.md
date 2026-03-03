@@ -118,19 +118,19 @@ Goal: Both scripts work on real PDFs and fail in a clear, predictable way. No ne
 
 | # | Task | Details | Done |
 |---|------|--------|------|
-| 1.1 | Run on 2–3 real PDFs | Different layouts; confirm sheets, headers, and data in generated .xlsx. | [ ] |
+| 1.1 | Run on 2–3 real PDFs | Different layouts; confirm sheets, headers, and data in generated .xlsx. | [x] |
 | 1.2 | Edge cases | No tables → no crash; clear message or single empty sheet. Empty/corrupt/non-PDF → clear error. | [x] |
-| 1.3 | Fix extraction if needed | Tune pdfplumber settings if tables are missed or wrong; document layouts that don’t work well. | [ ] |
+| 1.3 | Fix extraction if needed | Tune pdfplumber settings if tables are missed or wrong; document layouts that don’t work well. | [x] |
 | 1.4 | Paths and overwrite | Paths with spaces; read-only or missing output dir; overwrite vs require flag — decide and implement. | [x] |
 
 ### 7.2 AI path (`extract.py`)
 
 | # | Task | Details | Done |
 |---|------|--------|------|
-| 1.5 | Real PDF + query test | API key set; Excel created; content matches requested section. | [ ] |
+| 1.5 | Real PDF + query test | API key set; Excel created; content matches requested section. | [x] |
 | 1.6 | API and parsing edge cases | Missing/invalid key → clear error. Rate limit/timeout → catch and report. No CSV block → improve message/fallback. | [x] |
 | 1.7 | PDF limits | Over 32 MB → reject before API. Password-protected → reject or document. Long PDFs → document behaviour. | [x] |
-| 1.8 | Query edge cases | No match in PDF → “no matching data” row or message; don’t crash. Very long query → no crash. | [ ] |
+| 1.8 | Query edge cases | No match in PDF → “no matching data” row or message; don’t crash. Very long query → no crash. | [x] |
 
 ### 7.3 Errors and docs
 
@@ -150,9 +150,9 @@ Goal: Consistent behaviour, maintainability, optional tests.
 | # | Task | Details | Done |
 |---|------|--------|------|
 | 2.1 | Output path behaviour | Document default and `-o`; create output dir if needed. | [x] |
-| 2.2 | Optional default output dir | e.g. `output/` unless `-o` set; document. | [ ] |
+| 2.2 | Optional default output dir | e.g. `output/` unless `-o` set; document. | [x] |
 | 2.3 | Logging | Use `logging`; log PDF, query (extract), output path, errors; no secrets. | [x] |
-| 2.4 | Optional config | e.g. default model, output dir in `.env` or config file. | [ ] |
+| 2.4 | Optional config | e.g. default model, output dir in `.env` or config file. | [x] |
 | 2.5 | Unit tests (optional) | `extract.py`: CSV parsing and Excel write; optionally `tables_to_excel` with fixture/mock. | [x] |
 | 2.6 | Test runner | e.g. pytest; document how to run. | [x] |
 
@@ -169,7 +169,7 @@ Goal: Easier daily use and batch use.
 | 3.1 | CLI structure | Optional single entry (e.g. `run.py tables` / `run.py ask`) or keep two scripts; document. | [x] |
 | 3.2 | Help and examples | `--help` and README examples for both paths. | [x] |
 | 3.3 | Batch | Multiple PDFs → multiple Excel files (or one combined); document. | [x] |
-| 3.4 | Progress | e.g. “Page 3/20”, “Calling API…”, “Done.” for long runs. | [ ] |
+| 3.4 | Progress | e.g. “Page 3/20”, “Calling API…”, “Done.” for long runs. | [x] |
 | 3.5 | Anthropic Files API (optional) | Upload once, reuse `file_id` for multiple queries on same PDF. | [ ] |
 
 **Phase 3 sign-off:** CLI and batch (if added) clear and documented.
@@ -182,10 +182,10 @@ Goal: More reliable and flexible AI extraction.
 
 | # | Task | Details | Done |
 |---|------|--------|------|
-| 4.1 | System prompt | Few-shot examples; strict CSV rules; one table vs “all matching” defined. | [ ] |
-| 4.2 | Multiple tables | Support several CSV blocks or multiple sheets in one Excel from one query. | [ ] |
-| 4.3 | Structured output | If Anthropic supports JSON schema for tables, use it to avoid fragile CSV parsing. | [ ] |
-| 4.4 | Long PDFs | Optional “summarize then extract” (structure first, then by section). | [ ] |
+| 4.1 | System prompt | Few-shot examples; strict CSV rules; one table vs “all matching” defined. | [x] |
+| 4.2 | Multiple tables | Support several CSV blocks or multiple sheets in one Excel from one query. | [x] |
+| 4.3 | Structured output | If Anthropic supports JSON schema for tables, use it to avoid fragile CSV parsing. | [x] |
+| 4.4 | Long PDFs | Optional “summarize then extract” (structure first, then by section). | [x] |
 
 **Note:** AI = Anthropic only; key in `.env` as `ANTHROPIC_API_KEY`.
 
@@ -199,7 +199,7 @@ Only if we want more than CLI.
 
 | # | Task | Details | Done |
 |---|------|--------|------|
-| 5.1 | Web UI | Upload PDF, query box (AI path), run, download Excel. Auth/hosting separate. | [ ] |
+| 5.1 | Web UI | Upload PDF, query box (AI path), run, download Excel. Auth/hosting separate. | [x] |
 | 5.2 | Or local GUI | e.g. Tkinter/PyQt: choose PDF, query, output path, run. | [ ] |
 | 5.3 | Or API | REST/internal API wrapping both extraction paths; auth as needed. Enables **n8n** (and other tools) to call us via HTTP Request node. | [ ] |
 
@@ -249,10 +249,10 @@ Ideas we can add later, not required to start:
 ## 15. Summary checklist (order of work)
 
 - [ ] Prerequisites (Section 5) confirmed.
-- [ ] Phase 1 (Section 7) — validate and harden.
-- [ ] Phase 2 (Section 8) — structure and quality.
-- [ ] Phase 3 (Section 9) — UX and scale.
-- [ ] Phase 4 (Section 10) — AI behaviour.
+- [x] Phase 1 (Section 7) — validate and harden.
+- [x] Phase 2 (Section 8) — structure and quality.
+- [x] Phase 3 (Section 9) — UX and scale (3.5 optional, deferred).
+- [x] Phase 4 (Section 10) — AI behaviour.
 - [ ] Phase 5 (Section 11) — interface, if we do it.
 
 ---

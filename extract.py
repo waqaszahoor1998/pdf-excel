@@ -2,8 +2,8 @@
 """
 PDF → Excel via Anthropic (Claude) API.
 
-Upload a PDF, ask in natural language what to extract (e.g. "taxes for January 2026"),
-and get an Excel file with only that data.
+Behaviour is config-driven: limits, model, prompts, single vs multi-table,
+and optional structured output come from config file and environment (see config.py).
 """
 
 import argparse
@@ -25,52 +25,32 @@ from openpyxl import Workbook
 
 load_dotenv()
 
-# Max PDF size ~32MB, 100 pages per Anthropic limits
-MAX_PDF_BYTES = 32 * 1024 * 1024
-
-EXTRACTION_SYSTEM_PROMPT = """You are a precise data extraction assistant. You receive a PDF and a user request describing exactly which part of the document to extract (e.g. "company taxes for January 2026", "sales table from Q3", "list of employees in the HR section").
-
-Your ONLY job is to:
-1. Find in the PDF the data that matches the user's request.
-2. Return that data as a structured table. If there are multiple logical tables, return the one that best matches the request, or the first relevant one.
-
-You MUST respond with a valid CSV block and nothing else that could break parsing. Use this exact format:
-
----BEGIN CSV---
-header1,header2,header3
-value1,value2,value3
-...
----END CSV---
-
-Rules:
-- First line is the header (column names). Use clear, short names.
-- Use comma as delimiter. If a value contains a comma, wrap the whole value in double quotes.
-- No extra text, explanations, or markdown outside the CSV block. Only the block between ---BEGIN CSV--- and ---END CSV---.
-- If the requested data is not found in the PDF, output a single-row CSV with a column "error" and value "No matching data found".
-- Preserve numbers and dates as they appear; do not add units in the header unless they were in the document.
-"""
+from config import CONFIG_DIR, get_system_prompt_path, load_config
 
 
-def load_pdf_base64(path: str) -> str:
+def _load_prompt(path: Path) -> str:
+    return path.read_text(encoding="utf-8").strip()
+
+
+def load_pdf_base64(path: str, max_bytes: int) -> str:
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"PDF not found: {path}")
     if path.suffix.lower() != ".pdf":
         raise ValueError("File must be a PDF")
     data = path.read_bytes()
-    if len(data) > MAX_PDF_BYTES:
-        raise ValueError(f"PDF too large (max {MAX_PDF_BYTES // (1024*1024)}MB)")
+    if len(data) > max_bytes:
+        raise ValueError(f"PDF too large (max {max_bytes // (1024*1024)}MB)")
     return base64.standard_b64encode(data).decode("utf-8")
 
 
-def extract_csv_from_response(text: str) -> str:
+def extract_single_csv_from_response(text: str) -> str:
+    """Return the first CSV block content."""
     s = text.strip()
-    # Prefer our explicit block
     begin, end = "---BEGIN CSV---", "---END CSV---"
     i, j = s.find(begin), s.find(end)
     if i != -1 and j != -1 and j > i:
         return s[i + len(begin) : j].strip()
-    # Fallback: markdown code block
     for marker in ("```csv", "```CSV", "```"):
         if marker in s:
             start = s.find(marker) + len(marker)
@@ -79,7 +59,6 @@ def extract_csv_from_response(text: str) -> str:
             if end_m != -1:
                 return rest[:end_m].strip()
             return rest
-    # Last resort: first line with commas as header, rest as rows
     lines = [ln.strip() for ln in s.splitlines() if ln.strip()]
     for k, line in enumerate(lines):
         if "," in line and k + 1 <= len(lines):
@@ -87,16 +66,86 @@ def extract_csv_from_response(text: str) -> str:
     raise ValueError("No CSV block found in model response. Response was: " + text[:500])
 
 
-def csv_to_excel(csv_content: str, out_path: str) -> None:
+# Backward compatibility for tests
+extract_csv_from_response = extract_single_csv_from_response
+
+
+def _parse_one_csv_block(block: str) -> tuple[str | None, list[list[str]]]:
+    """Parse one CSV block; first line may be 'SheetName: X'. Returns (sheet_name, rows)."""
+    block = block.strip()
+    sheet_name = None
+    if block.lower().startswith("sheetname:"):
+        first_line, _, rest = block.partition("\n")
+        sheet_name = first_line[10:].strip()
+        block = rest.strip()
+    reader = csv.reader(io.StringIO(block))
+    rows = list(reader)
+    if not rows:
+        return sheet_name, []
+    return sheet_name, rows
+
+
+def extract_all_csv_blocks_from_response(text: str) -> list[tuple[str | None, list[list[str]]]]:
+    """Return list of (sheet_name, rows) for each CSV block."""
+    out = []
+    begin, end = "---BEGIN CSV---", "---END CSV---"
+    start = 0
+    while True:
+        i = text.find(begin, start)
+        j = text.find(end, i) if i != -1 else -1
+        if i == -1 or j == -1 or j <= i:
+            break
+        raw = text[i + len(begin) : j].strip()
+        name, rows = _parse_one_csv_block(raw)
+        out.append((name, rows))
+        start = j + len(end)
+    if not out:
+        single = extract_single_csv_from_response(text)
+        _, rows = _parse_one_csv_block(single)
+        out = [(None, rows)]
+    return out
+
+
+def csv_to_excel(csv_content: str, out_path: str, sheet_name: str = "Extracted") -> None:
     reader = csv.reader(io.StringIO(csv_content))
     rows = list(reader)
     if not rows:
         raise ValueError("CSV has no rows")
     wb = Workbook()
     ws = wb.active
-    ws.title = "Extracted"
+    ws.title = sheet_name[:31] if sheet_name else "Extracted"
     for r in rows:
         ws.append(r)
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    wb.save(out_path)
+
+
+def _sanitize_sheet_name(name: str | None, fallback: str) -> str:
+    if not name or not name.strip():
+        return fallback
+    s = (
+        name.replace("\\", " ")
+        .replace("/", " ")
+        .replace("*", " ")
+        .replace("?", " ")
+        .replace("[", " ")
+        .replace("]", " ")[:31]
+        .strip()
+    )
+    return s or fallback
+
+
+def tables_to_excel(tables: list[tuple[str | None, list[list[str]]]], out_path: str) -> None:
+    """Write multiple tables to one Excel file, one sheet per table."""
+    if not tables:
+        raise ValueError("No tables to write")
+    wb = Workbook()
+    wb.remove(wb.active)
+    for idx, (name, rows) in enumerate(tables):
+        title = _sanitize_sheet_name(name, f"Sheet_{idx + 1}")
+        ws = wb.create_sheet(title=title)
+        for r in rows:
+            ws.append(r if isinstance(r, list) else [r])
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     wb.save(out_path)
 
@@ -105,19 +154,50 @@ def json_sections_to_excel(sections: list[dict], out_path: str) -> None:
     """Write structured sections (name, headers, rows) to Excel, one sheet per section."""
     if not sections:
         raise ValueError("No sections to write")
-    wb = Workbook()
-    wb.remove(wb.active)
-    for idx, sec in enumerate(sections):
-        name = (sec.get("name") or f"Section_{idx + 1}").replace("\\", "").replace("/", "").replace("*", " ").replace("?", "").replace("[", "").replace("]", "")[:31]
+    tables = []
+    for sec in sections:
+        name = sec.get("name")
         headers = sec.get("headers") or []
         rows = sec.get("rows") or []
-        ws = wb.create_sheet(title=name or f"Sheet{idx + 1}")
-        if headers:
-            ws.append(headers)
-        for r in rows:
-            ws.append(r if isinstance(r, list) else [r])
-    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    wb.save(out_path)
+        rows = [headers] + list(rows) if headers else list(rows)
+        tables.append((name, rows))
+    tables_to_excel(tables, out_path)
+
+
+def _call_api(
+    client: anthropic.Anthropic,
+    pdf_b64: str,
+    user_text: str,
+    system_prompt: str,
+    model: str,
+    config: dict,
+) -> str:
+    """Single API call; returns response text. Optional output_config from config."""
+    user_content = [
+        {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_b64}},
+        {"type": "text", "text": user_text},
+    ]
+    kwargs = {
+        "model": model,
+        "max_tokens": 8192,
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": user_content}],
+    }
+    if config.get("use_structured_output"):
+        schema_path = config.get("structured_schema_path")
+        if schema_path:
+            path = Path(schema_path)
+            if not path.is_absolute():
+                path = CONFIG_DIR / path
+            if path.exists():
+                schema = json.loads(path.read_text(encoding="utf-8"))
+                kwargs["output_config"] = {"format": {"type": "json_schema", "schema": schema}}
+    message = client.messages.create(**kwargs)
+    response_text = ""
+    for block in message.content:
+        if hasattr(block, "text"):
+            response_text += block.text
+    return response_text
 
 
 def extract_pdf_to_excel(
@@ -126,77 +206,105 @@ def extract_pdf_to_excel(
     output_path: str,
     api_key: str | None = None,
     model: str | None = None,
+    config: dict | None = None,
 ) -> str:
     """
     Extract data from PDF per user query using Anthropic API and save as Excel.
-
-    Returns the path to the saved Excel file.
+    All limits and behaviour come from config (and env). Returns the path to the saved Excel file.
     """
+    cfg = config or load_config()
     api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise ValueError("Set ANTHROPIC_API_KEY in .env or pass api_key=...")
-    model = model or os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
+    model = model or cfg.get("default_model") or os.environ.get("ANTHROPIC_MODEL")
+    if not model:
+        raise ValueError("Set ANTHROPIC_MODEL in .env or default_model in config")
 
-    pdf_b64 = load_pdf_base64(pdf_path)
+    max_bytes = int(cfg.get("max_pdf_bytes", 32 * 1024 * 1024))
+    query_max = int(cfg.get("query_max_length", 8000))
+    query_text = (user_query[:query_max] + "...") if len(user_query) > query_max else user_query
+
+    prompt_path = get_system_prompt_path(cfg)
+    if not prompt_path or not prompt_path.exists():
+        raise ValueError(
+            "No system prompt file found. Set SYSTEM_PROMPT_PATH or add prompts/extraction_single.txt (and extraction_all.txt) in prompts_dir."
+        )
+    system_prompt = _load_prompt(prompt_path)
+
+    pdf_b64 = load_pdf_base64(pdf_path, max_bytes)
     log.info("Calling API…")
     client = anthropic.Anthropic(api_key=api_key)
+    extraction_mode = (cfg.get("extraction_mode") or "single").strip().lower()
 
-    user_content = [
-        {
-            "type": "document",
-            "source": {
-                "type": "base64",
-                "media_type": "application/pdf",
-                "data": pdf_b64,
-            },
-        },
-        {
-            "type": "text",
-            "text": f"Extract the following from this PDF and return only the CSV block as specified:\n\n{user_query}",
-        },
-    ]
+    # Optional: long-PDF structure step
+    if cfg.get("long_pdf_enabled"):
+        structure_path = Path(cfg.get("prompts_dir") or "").strip() or Path(__file__).resolve().parent / "prompts"
+        if not structure_path.is_absolute():
+            structure_path = Path(__file__).resolve().parent / structure_path
+        structure_file = structure_path / "structure.txt"
+        if structure_file.exists():
+            structure_prompt = _load_prompt(structure_file)
+            structure_text = _call_api(client, pdf_b64, structure_prompt, structure_prompt, model, cfg)
+            user_text = f"Document structure (for context):\n{structure_text[:2000]}\n\nUser request: Extract the following from this PDF and return only the CSV block(s) as specified:\n\n{query_text}"
+        else:
+            user_text = f"Extract the following from this PDF and return only the CSV block(s) as specified:\n\n{query_text}"
+    else:
+        user_text = f"Extract the following from this PDF and return only the CSV block(s) as specified:\n\n{query_text}"
 
-    message = client.messages.create(
-        model=model,
-        max_tokens=8192,
-        system=EXTRACTION_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_content}],
-    )
+    response_text = _call_api(client, pdf_b64, user_text, system_prompt, model, cfg)
 
-    response_text = ""
-    for block in message.content:
-        if hasattr(block, "text"):
-            response_text += block.text
+    if cfg.get("use_structured_output") and cfg.get("structured_schema_path"):
+        try:
+            data = json.loads(response_text)
+            tables_data = data.get("tables") or []
+            if tables_data:
+                tables = []
+                for t in tables_data:
+                    name = t.get("name")
+                    headers = t.get("headers") or []
+                    rows = t.get("rows") or []
+                    tables.append((name, [headers] + rows if headers else rows))
+                tables_to_excel(tables, output_path)
+                log.info("Done.")
+                return output_path
+        except (json.JSONDecodeError, KeyError):
+            pass
 
-    csv_content = extract_csv_from_response(response_text)
-    csv_to_excel(csv_content, output_path)
+    # CSV path
+    if extraction_mode == "all":
+        blocks = extract_all_csv_blocks_from_response(response_text)
+        tables_to_excel(blocks, output_path)
+    else:
+        csv_content = extract_single_csv_from_response(response_text)
+        csv_to_excel(csv_content, output_path)
     log.info("Done.")
     return output_path
 
 
 def main() -> int:
+    cfg = load_config()
+    default_model = cfg.get("default_model") or os.environ.get("ANTHROPIC_MODEL") or ""
     parser = argparse.ArgumentParser(
         description="Extract data from a PDF using a natural-language query and save to Excel (via Anthropic API)."
     )
     parser.add_argument("pdf", help="Path to the PDF file")
     parser.add_argument("query", help="What to extract, e.g. 'company taxes for January 2026'")
-    parser.add_argument(
-        "-o",
-        "--output",
-        default=None,
-        help="Output Excel path (default: same name as PDF with .xlsx)",
-    )
+    parser.add_argument("-o", "--output", default=None, help="Output Excel path")
     parser.add_argument(
         "--model",
-        default="claude-3-5-sonnet-20241022",
-        help="Anthropic model (default: claude-3-5-sonnet-20241022, or set ANTHROPIC_MODEL in .env)",
+        default=default_model,
+        help="Anthropic model (or set ANTHROPIC_MODEL in .env / default_model in config)",
     )
+    parser.add_argument("--config", default=None, help="Path to extract config JSON (optional)")
     args = parser.parse_args()
+
+    config_path = args.config or os.environ.get("EXTRACT_CONFIG_PATH")
+    config = load_config(config_path) if config_path else load_config()
 
     try:
         out = args.output or str(Path(args.pdf).with_suffix(".xlsx"))
         log.info("PDF: %s | Query: %s | Output: %s", args.pdf, args.query[:50] + "..." if len(args.query) > 50 else args.query, out)
-        result = extract_pdf_to_excel(args.pdf, args.query, out, model=args.model)
+        result = extract_pdf_to_excel(args.pdf, args.query, out, model=args.model or None, config=config)
         print(f"Saved: {result}")
         return 0
     except (FileNotFoundError, ValueError) as e:
@@ -214,6 +322,7 @@ def main() -> int:
             print(f"Error: API request failed. {msg}", file=sys.stderr)
         return 1
     except Exception as e:
+        log.exception("Extract failed")
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
