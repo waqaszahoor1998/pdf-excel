@@ -17,6 +17,7 @@ load_dotenv()
 # Optional config file path (env overrides)
 CONFIG_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFIG_PATH = CONFIG_DIR / "config" / "extract.json"
+QB_CLEANUP_CONFIG_PATH = CONFIG_DIR / "config" / "qb_cleanup.json"
 
 
 def _env_int(key: str, default: int | None = None) -> int | None:
@@ -90,6 +91,38 @@ def load_config(config_path: str | Path | None = None) -> dict:
         "long_pdf_enabled": get("long_pdf_enabled", "LONG_PDF_ENABLED", False),
         "long_pdf_chunk_pages": get("long_pdf_chunk_pages", "LONG_PDF_CHUNK_PAGES", 25),
         "default_model": get("default_model", "ANTHROPIC_MODEL"),
+    }
+
+
+def load_qb_cleanup_config() -> dict:
+    """
+    Load QB cleanup rules from config/qb_cleanup.json (footer phrases, header fragment merges, title→sheet).
+    Used so different PDFs can be supported by editing config, not code.
+    Returns dict with keys: footer_phrases, header_fragment_merges, title_to_sheet (list of [pattern, sheet_name]).
+    """
+    defaults = {
+        "footer_phrases": [
+            "available online",
+            "form 1099",
+            "if you have not",
+            '"form") will',
+            "this page intentionally left blank",
+        ],
+        "header_fragment_merges": [["Year-to-", "Date"], ["Month-to-", "Date"], ["Quarter-to-", "Date"]],
+        "title_to_sheet": [],
+    }
+    path = QB_CLEANUP_CONFIG_PATH
+    if not path.exists():
+        return defaults
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return defaults
+    return {
+        "footer_phrases": data.get("footer_phrases", defaults["footer_phrases"]),
+        "header_fragment_merges": data.get("header_fragment_merges", defaults["header_fragment_merges"]),
+        "title_to_sheet": data.get("title_to_sheet", defaults["title_to_sheet"]),
     }
 
 

@@ -13,9 +13,11 @@ import re
 from pathlib import Path
 
 from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
+
+from config import load_qb_cleanup_config
 from tables_to_excel import _cell_value as _normalize_cell_value
 from tables_to_excel import _merge_fragmented_row
-from openpyxl.styles import Font, PatternFill
 
 # QB-style colors (from sample workbook – see color scan below)
 # GREEN 92D050: section separator row; first row of each block; cells that contain account IDs (902-7, 1004, E79271004)
@@ -148,6 +150,9 @@ def _target_sheet_name(source_name: str) -> str:
     # If base is a known QB name, use it
     if base in QB_SHEET_ORDER:
         return base
+    # "PLSummary J.P. Morgan Chase" or similar -> "PLSummary"
+    if "plsummary" in base.lower() or "mtd pnl" in s.lower():
+        return "PLSummary"
     # Per-account pattern: "ABC TRUST ACCT. E79271004_1" -> "Account E79271004" (merge all pages for same account)
     m = re.search(r"ACCT\.\s*([A-Z0-9]+)", s, re.I)
     if m:
@@ -445,12 +450,42 @@ def _row_has_table_data(row: list) -> bool:
     return False
 
 
+def _get_footer_phrases() -> list:
+    """Lazy-load footer phrases from config (so different PDFs can add phrases without code changes)."""
+    if _get_footer_phrases._cache is None:
+        _get_footer_phrases._cache = load_qb_cleanup_config().get("footer_phrases", [])
+    return _get_footer_phrases._cache
+
+
+_get_footer_phrases._cache = None  # type: ignore[attr-defined]
+
+
+def _is_footer_row(row: list) -> bool:
+    """
+    True if row looks like PDF footer/disclaimer text.
+    Uses config/qb_cleanup.json footer_phrases so you can add phrases for your PDFs without code changes.
+    """
+    if not row:
+        return False
+    cells = [c for c in (row if isinstance(row, (list, tuple)) else [row]) if c is not None and str(c).strip()]
+    if not cells:
+        return False
+    text = " ".join(str(c).strip().lower() for c in cells)
+    for phrase in _get_footer_phrases():
+        if phrase.lower() in text:
+            return True
+    return False
+
+
 def _is_prose_row(row: list) -> bool:
     """
     True if row looks like disclaimer, footnote, or long prose (not table data).
     Rows that contain table data (account ID, $ amounts) are kept even if they have some prose.
     """
     if not row:
+        return True
+    # Drop footer rows first (e.g. "Form will be available online")
+    if _is_footer_row(row):
         return True
     cells = [c for c in (row if isinstance(row, (list, tuple)) else [row]) if c is not None and str(c).strip()]
     if not cells:
@@ -590,30 +625,41 @@ def transform_extracted_to_qb(extracted_xlsx_path: str, output_path: str) -> str
 
 def pdf_to_qb_excel(pdf_path: str, output_path: str, overwrite: bool = True) -> str:
     """
-    Full pipeline: extract PDF to Excel, then transform to QB format.
+    Full pipeline: PDF → JSON (canonical) → Excel. JSON is the intermediate; Excel is built from it.
 
-    1. Run tables_to_excel to a temp file.
-    2. Transform that file to QB layout (merge/rename sheets).
-    3. Save to output_path. Returns output_path.
+    1. Extract PDF to sections; write JSON.
+    2. Load sections from JSON; write raw Excel from it.
+    3. Transform raw Excel to structured workbook (merge/rename sheets, colors).
+    4. Save to output_path. Returns output_path.
     """
     import tempfile
-    from tables_to_excel import pdf_tables_to_excel
+    from tables_to_excel import (
+        extract_sections_from_pdf,
+        load_sections_from_json,
+        _write_json_from_sections,
+        _write_sections_to_workbook,
+    )
 
     out_path = Path(output_path)
     if out_path.exists() and not overwrite:
         raise FileExistsError(f"Output exists: {out_path}")
 
-    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
-        temp_extracted = f.name
+    # 1. PDF → JSON (canonical intermediate)
+    sections = extract_sections_from_pdf(pdf_path)
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        json_path = f.name
     try:
-        pdf_tables_to_excel(
-            pdf_path,
-            temp_extracted,
-            overwrite=True,
-            write_json=True,
-            json_path=out_path.with_suffix(".json"),
-        )
-        transform_extracted_to_qb(temp_extracted, output_path)
-        return str(out_path)
+        _write_json_from_sections(sections, Path(json_path), overwrite=True)
+        # 2. JSON → raw Excel (Excel is produced from JSON)
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            temp_extracted = f.name
+        try:
+            sections_from_json = load_sections_from_json(json_path)
+            _write_sections_to_workbook(sections_from_json, Path(temp_extracted))
+            # 3. Transform to structured workbook
+            transform_extracted_to_qb(temp_extracted, output_path)
+            return str(out_path)
+        finally:
+            Path(temp_extracted).unlink(missing_ok=True)
     finally:
-        Path(temp_extracted).unlink(missing_ok=True)
+        Path(json_path).unlink(missing_ok=True)

@@ -23,8 +23,13 @@ load_dotenv(_env_path)
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
 
-from tables_to_excel import pdf_tables_to_excel
-from pdf_to_qb import pdf_to_qb_excel
+from tables_to_excel import (
+    extract_sections_from_pdf,
+    _write_json_from_sections,
+    load_sections_from_json,
+    _write_sections_to_workbook,
+)
+from pdf_to_qb import pdf_to_qb_excel, transform_extracted_to_qb
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-in-production")
@@ -128,6 +133,104 @@ def extract():
         return redirect(url_for("index"))
     except Exception as e:
         log.exception("extract: %s", e)
+        flash(f"Error: {e}")
+        return redirect(url_for("index"))
+    finally:
+        if tmp_dir and Path(tmp_dir).exists():
+            try:
+                for f in Path(tmp_dir).iterdir():
+                    f.unlink(missing_ok=True)
+                Path(tmp_dir).rmdir()
+            except OSError:
+                pass
+
+
+@app.route("/pdf-to-json", methods=["POST"])
+def pdf_to_json_route():
+    """Step 1: PDF → JSON only. Download the JSON so you can edit it, then use JSON → Excel."""
+    if "pdf" not in request.files:
+        flash("No file selected.")
+        return redirect(url_for("index"))
+    file = request.files["pdf"]
+    if not file or file.filename == "":
+        flash("No file selected.")
+        return redirect(url_for("index"))
+    if not file.filename.lower().endswith(".pdf"):
+        flash("Please upload a PDF file.")
+        return redirect(url_for("index"))
+    tmp_dir = None
+    try:
+        tmp_dir = tempfile.mkdtemp()
+        pdf_path = Path(tmp_dir) / "upload.pdf"
+        file.save(str(pdf_path))
+        json_path = Path(tmp_dir) / "output.json"
+        sections = extract_sections_from_pdf(str(pdf_path))
+        _write_json_from_sections(sections, json_path, overwrite=True)
+        if not json_path.exists():
+            flash("Conversion produced no JSON.")
+            return redirect(url_for("index"))
+        base_name = Path(file.filename).stem
+        download_name = f"{base_name}.json"
+        return send_file(
+            str(json_path),
+            as_attachment=True,
+            download_name=download_name,
+            mimetype="application/json",
+        )
+    except Exception as e:
+        log.exception("pdf-to-json: %s", e)
+        flash(f"Error: {e}")
+        return redirect(url_for("index"))
+    finally:
+        if tmp_dir and Path(tmp_dir).exists():
+            try:
+                for f in Path(tmp_dir).iterdir():
+                    f.unlink(missing_ok=True)
+                Path(tmp_dir).rmdir()
+            except OSError:
+                pass
+
+
+@app.route("/json-to-excel", methods=["POST"])
+def json_to_excel_route():
+    """Step 2: JSON → Excel. Upload JSON (from PDF→JSON or edited) to get structured xlsx."""
+    if "json_file" not in request.files:
+        flash("No file selected.")
+        return redirect(url_for("index"))
+    file = request.files["json_file"]
+    if not file or file.filename == "":
+        flash("No file selected.")
+        return redirect(url_for("index"))
+    if not file.filename.lower().endswith(".json"):
+        flash("Please upload a JSON file (from PDF→JSON step).")
+        return redirect(url_for("index"))
+    tmp_dir = None
+    try:
+        tmp_dir = tempfile.mkdtemp()
+        json_path = Path(tmp_dir) / "input.json"
+        file.save(str(json_path))
+        out_xlsx = Path(tmp_dir) / "output.xlsx"
+        sections = load_sections_from_json(json_path)
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            temp_xlsx = f.name
+        try:
+            _write_sections_to_workbook(sections, Path(temp_xlsx))
+            transform_extracted_to_qb(temp_xlsx, str(out_xlsx))
+        finally:
+            Path(temp_xlsx).unlink(missing_ok=True)
+        if not out_xlsx.exists():
+            flash("Conversion produced no Excel file.")
+            return redirect(url_for("index"))
+        base_name = Path(file.filename).stem
+        download_name = f"{base_name}.xlsx"
+        return send_file(
+            str(out_xlsx),
+            as_attachment=True,
+            download_name=download_name,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    except Exception as e:
+        log.exception("json-to-excel: %s", e)
         flash(f"Error: {e}")
         return redirect(url_for("index"))
     finally:

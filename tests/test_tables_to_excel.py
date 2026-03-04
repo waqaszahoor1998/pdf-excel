@@ -39,6 +39,15 @@ class TestMergeFragmentedRow:
         assert _merge_fragmented_row([]) == []
         assert _merge_fragmented_row(["Only"]) == ["Only"]
 
+    def test_split_parenthetical_negative(self):
+        # "(37,30" + "3.03)" -> -37303.03
+        out = _merge_fragmented_row(["Net Contributions/Withdrawals", None, None, "(37,30", "3.03)", None])
+        assert out[3] == -37303.03
+
+    def test_year_to_date_merge(self):
+        out = _merge_fragmented_row(["Current", "Year-to-", "Date", ""])
+        assert out[1] == "Year-to-Date"
+
 
 class TestCellValue:
     """Tests for _cell_value() numeric normalization."""
@@ -50,6 +59,10 @@ class TestCellValue:
     def test_dollar_amount_after_digits(self):
         assert _cell_value("09 $24,157,595.24") == 24157595.24
         assert _cell_value("24 $24,284,278.98") == 24284278.98
+
+    def test_footnote_stripped_from_string(self):
+        assert _cell_value("E79271004¹") == "E79271004"
+        assert _cell_value("G41269004²") == "G41269004"
 
 
 class TestCleanTableRows:

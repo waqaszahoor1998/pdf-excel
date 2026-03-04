@@ -149,7 +149,7 @@
 <body>
   <div class="container">
     <h1>PDF → Excel</h1>
-    <p class="subtitle">Upload a PDF and get QB-format Excel (clean sheets, structured layout) or use Ask AI to extract specific data.</p>
+    <p class="subtitle">Upload a PDF and get structured Excel (clean sheets, one per section) or use Ask AI to extract specific data.</p>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -176,7 +176,7 @@
         <div class="radio-group">
           <label class="radio-label">
             <input type="radio" name="mode" value="offline" id="modeOffline" checked>
-            Extract to QB format — local only, no API. Tables and sections become clean sheets (Account Summary, Asset Allocation, etc.).
+            Extract to Excel — local only, no API. Tables and sections become clean sheets (Account Summary, Asset Allocation, Portfolio Activity, etc.).
           </label>
           <label class="radio-label">
             <input type="radio" name="mode" value="ai" id="modeAi" {% if not ai_available %}disabled{% endif %}>
@@ -192,7 +192,7 @@
         <p class="query-hint">The PDF is sent to Anthropic (Claude) to extract only what you ask for.</p>
       </div>
 
-      <p class="query-hint" id="offlineHint" style="margin-bottom: 0.5rem;">QB format: one sheet per section with merged Account Summary, PLSummary-style layout, and per-account sheets.</p>
+      <p class="query-hint" id="offlineHint" style="margin-bottom: 0.5rem;">Structured output: one sheet per section, merged summaries, and per-account sheets.</p>
 
       <div class="form-group" style="margin-top: 1.25rem;">
         <button type="submit" class="btn btn-primary" id="submitBtn">Extract to Excel</button>

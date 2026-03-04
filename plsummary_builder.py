@@ -2,7 +2,7 @@
 """
 Build a PLSummary-style sheet (like QB Automation Sheet sample) from extracted PDF data.
 
-Creates "PLSummary J.P. Morgan Chase" with:
+Creates "PLSummary" with:
 - Header: Entity, Report title, Broker, Account ID
 - Columns: BOM, MTD, MTD, MTD, EOM | Account Name, Market Value, Cash In, Cash Out, PNL, Market Value
 - Rows: Investments, Cash and cash equivalents, Totals, then line items (Accrued Dividend, Interest Income, etc.)
@@ -152,10 +152,10 @@ def build_plsummary_jpm_sheet(
     broker_name: str = "J.P. Morgan Chase",
 ) -> None:
     """
-    Add a worksheet "PLSummary J.P. Morgan Chase" to wb_out with sample-like layout.
+    Add a worksheet "PLSummary" to wb_out with sample-like layout (QB format).
     Fills from by_target (Account Summary, Asset Allocation, Portfolio Activity, Tax Summary).
     """
-    ws = wb_out.create_sheet(title="PLSummary J.P. Morgan Chase", index=0)
+    ws = wb_out.create_sheet(title="PLSummary", index=0)
 
     # Get first block of each type
     acc_rows = by_target.get("Account Summary", [])

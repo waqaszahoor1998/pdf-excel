@@ -5,5 +5,7 @@ openai>=1.0.0
 openpyxl>=3.1.0
 python-dotenv>=1.0.0
 pdfplumber>=0.11.0
+# PyMuPDF (fitz): fallback when pdfplumber gets no text (e.g. some broker statement PDFs expose text to fitz only)
+pymupdf>=1.24.0
 pytest>=7.0.0
 reportlab>=4.0.0

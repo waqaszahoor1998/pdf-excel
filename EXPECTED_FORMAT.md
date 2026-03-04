@@ -1,17 +1,19 @@
 # Source PDF and Target Excel Format
 
+This doc describes the **target Excel structure** the extractor aims for: one sheet per report/section, clear headers, numeric data. The layout is driven by the *content* of the PDF (statements, summaries, etc.), not by a single proprietary format. Names like “QB” in the codebase refer to an early sample file; the product is a general **PDF data extractor** for tabular (and other) content.
+
 ## How to use
 
 1. **Web app**  
    Run `flask --app app run` (or `python app.py`), open http://127.0.0.1:5000, upload your PDF.  
    - **Raw extraction**: one sheet per section (good for checking what was extracted).  
-   - **QB Automation format**: merged sheets by type and by account (Period Summary, Asset Allocation, Portfolio Activity, Tax Summary, Account E79271004, Account G41269004, Broker Info). Use this for feeding into your QB workflow.
+   - **Structured workbook**: merged sheets by type and by account (e.g. Period Summary, Asset Allocation, Portfolio Activity, Tax Summary, per-account sheets, Broker Info). Use this for downstream workflows, reporting, or APIs.
 
 2. **Command line (raw)**  
    `python -m tables_to_excel "9004-20251231-Combined-Statement-001.pdf" -o raw.xlsx`
 
-3. **Command line (QB format)**  
-   `python -c "from pdf_to_qb import pdf_to_qb_excel; pdf_to_qb_excel('your.pdf', 'qb_output.xlsx')"`
+3. **Command line (structured workbook)**  
+   `python -c "from pdf_to_qb import pdf_to_qb_excel; pdf_to_qb_excel('your.pdf', 'output.xlsx')"`
 
 ---
 
@@ -31,9 +33,9 @@ Section titles you will see in the PDF include: *Account Summary*, *Consolidated
 
 ---
 
-## Target: QB Automation Sheet format
+## Target: Structured workbook (sheet-per-section)
 
-The **desired output** structure is based on **QB Automation Sheet- December 2025.xlsx**. The extractor should aim to produce similar layout and sheet naming.
+The **desired output** is a workbook with one sheet per logical report/section, clear column headers, and numeric/date values (not text where possible). The structure follows the PDF’s sections (e.g. Account Summary, Asset Allocation, Portfolio Activity); an early reference was a sample file named “QB Automation Sheet” — the extractor is not tied to that file, it aims for a clean, consistent layout for any statement/summary-style PDF.
 
 ## Overall structure
 
@@ -93,7 +95,7 @@ The **desired output** structure is based on **QB Automation Sheet- December 202
 | **Orange**      | FFC000 | Occasional emphasis (e.g. Net Assets rows 21–22). Applied in our output to **Totals rows** (first cell = Total / Totals / Total Value). |
 | **Light blue**  | D9E1F2 | **Column header row** (Account Name, Market Value, BOM, EOM, etc.) when detected. |
 
-The extractor applies these rules when building the QB-format workbook: green for section/block and account-ID cells, yellow for formulas and "Checks", orange for Totals rows, blue for header rows.
+The extractor applies these rules when building the structured workbook: green for section/block and account-ID cells, yellow for formulas and "Checks", orange for Totals rows, blue for header rows.
 
 ---
 

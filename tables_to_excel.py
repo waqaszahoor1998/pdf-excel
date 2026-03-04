@@ -16,14 +16,26 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger(__name__)
 
 import pdfplumber
+
+from config import load_qb_cleanup_config
 from openpyxl import Workbook
+
+
+def _get_header_fragment_merges() -> list:
+    """Lazy-load header fragment merges from config (e.g. [['Year-to-', 'Date']])."""
+    if _get_header_fragment_merges._cache is None:
+        _get_header_fragment_merges._cache = load_qb_cleanup_config().get("header_fragment_merges", [])
+    return _get_header_fragment_merges._cache
+
+
+_get_header_fragment_merges._cache = None  # type: ignore[attr-defined]
 from openpyxl.styles import Font, Alignment
 from openpyxl.utils import get_column_letter
 
 
 def _safe_sheet_name(name: str, fallback: int) -> str:
-    """Excel sheet names: max 31 chars, no \\ / * ? [ ]"""
-    s = (name or f"Sheet{fallback}").replace("\\", "").replace("/", "").replace("*", "").replace("?", "").replace("[", "").replace("]", "")
+    """Excel sheet names: max 31 chars, no \\ / * ? [ ] :"""
+    s = (name or f"Sheet{fallback}").replace("\\", "").replace("/", "").replace("*", "").replace("?", "").replace("[", "").replace("]", "").replace(":", " ")
     return s[:31] if s else f"Sheet{fallback}"
 
 
@@ -69,11 +81,34 @@ REPORT_TITLE_TO_SHEET = [
 ]
 
 
+def _get_title_to_sheet_config() -> list[tuple[re.Pattern, str]]:
+    """Lazy-load title→sheet mappings from config (so you can add patterns for new PDFs without code changes)."""
+    if _get_title_to_sheet_config._cache is None:
+        raw = load_qb_cleanup_config().get("title_to_sheet") or []
+        out = []
+        for item in raw:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                try:
+                    # Pattern: plain text matches anywhere; use regex if you need (e.g. "statement.*holdings")
+                    out.append((re.compile(str(item[0]), re.I), str(item[1]).strip()))
+                except re.error:
+                    out.append((re.compile(re.escape(str(item[0])), re.I), str(item[1]).strip()))
+        _get_title_to_sheet_config._cache = out
+    return _get_title_to_sheet_config._cache
+
+
+_get_title_to_sheet_config._cache = None  # type: ignore[attr-defined]
+
+
 def _preferred_sheet_name_from_title(text: str) -> str | None:
-    """If text matches a known report type, return the target sheet name; else None."""
+    """If text matches a known report type (built-in or config), return the target sheet name; else None."""
     if not (text and isinstance(text, str)):
         return None
     s = text.strip()
+    # Config first (so your PDF's titles override built-in)
+    for pattern, sheet_name in _get_title_to_sheet_config():
+        if pattern.search(s):
+            return sheet_name
     for pattern, sheet_name in REPORT_TITLE_TO_SHEET:
         if pattern.search(s):
             return sheet_name
@@ -125,6 +160,8 @@ def _cell_value(c) -> str | int | float:
             return int(clean)
     except ValueError:
         pass
+    # Strip footnote/superscript markers from strings (e.g. E79271004¹ -> E79271004) for clean account IDs
+    s = re.sub(r"[\u00B9\u00B2\u00B3\u2070-\u2079]+$", "", s)
     return s
 
 
@@ -190,6 +227,24 @@ def _merge_fragmented_row(cells: list) -> list:
             if len(last) >= 4 and last[-1].isalpha() and re.match(r"^[a-zA-Z]{1,2}$", s):
                 out[-1] = last + s
                 continue
+            # Merge split parenthetical negative: "(37,30" + "3.03)" -> one number -37303.03
+            if re.match(r"^\(\d{1,3}(,\d{2,3})?$", last) and re.match(r"^\d+\.\d{2}\)$", s):
+                try:
+                    combined = last + s  # "(37,30" + "3.03)" -> "(37,303.03)"
+                    inner = combined[1:-1].strip().replace(",", "")
+                    val = float(inner)
+                    out[-1] = round(-val, 2) if abs(val) >= 0.01 or val == 0 else -val
+                except ValueError:
+                    out.append(s)
+                continue
+            # Merge header fragments from config (e.g. "Year-to-" + "Date" -> "Year-to-Date")
+            for prefix, suffix in _get_header_fragment_merges():
+                if last.rstrip().endswith(prefix) and s.strip() == suffix:
+                    out[-1] = last.rstrip() + suffix
+                    break
+            else:
+                out.append(s)
+            continue
         out.append(s)
     return out
 
@@ -530,6 +585,115 @@ def _write_section_to_sheet(ws, sec_name: str, heading_rows: list, data_rows: li
     return row_num
 
 
+def _extract_sections_from_pdf_pymupdf(pdf_path: Path) -> list[tuple[str, list, list]]:
+    """
+    Fallback when pdfplumber gets no text: use PyMuPDF (fitz) with layout.
+    Uses get_text("dict") so we keep table structure: group spans by row (y), sort by x for columns.
+    """
+    try:
+        import fitz
+    except ImportError:
+        log.warning("PyMuPDF not installed; pip install pymupdf for fallback extraction")
+        return []
+
+    ROW_TOLERANCE = 5  # pts: spans within this y-distance are same row
+    COL_GAP = 15  # pts: gap in x to treat as new column
+
+    def page_to_rows(page) -> list[list[str]]:
+        """Build list of rows; each row is list of cell strings (using bbox for columns)."""
+        blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE).get("blocks") or []
+        # Collect (y0, x0, text) for each span
+        items = []
+        for block in blocks:
+            for line in block.get("lines") or []:
+                for span in line.get("spans") or []:
+                    text = (span.get("text") or "").strip()
+                    if not text:
+                        continue
+                    bbox = span.get("bbox", (0, 0, 0, 0))
+                    x0, y0 = bbox[0], bbox[1]
+                    items.append((y0, x0, text))
+        if not items:
+            return []
+        # Group by row (similar y)
+        items.sort(key=lambda t: (round(t[0] / ROW_TOLERANCE), t[1]))
+        rows = []
+        current_y = None
+        current_cells = []
+        for y0, x0, text in items:
+            y_key = round(y0 / ROW_TOLERANCE)
+            if current_y is not None and y_key != current_y:
+                if current_cells:
+                    rows.append([c for _, c in sorted(current_cells, key=lambda t: t[0])])
+                current_cells = []
+            current_y = y_key
+            # Merge spans that are close in x (same cell)
+            if current_cells and abs(x0 - current_cells[-1][0]) < COL_GAP:
+                current_cells[-1] = (current_cells[-1][0], (current_cells[-1][1] + " " + text).strip())
+            else:
+                current_cells.append((x0, text))
+        if current_cells:
+            rows.append([c for _, c in sorted(current_cells, key=lambda t: t[0])])
+        return rows
+
+    sections = []
+    doc = fitz.open(str(pdf_path))
+    try:
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            rows = page_to_rows(page)
+            if not rows:
+                continue
+            added_this_page = False
+            i = 0
+            while i < len(rows):
+                row = rows[i]
+                first_cell = (row[0] if row else "").strip()
+                # Section headers are short ALL CAPS (e.g. "PORTFOLIO ACTIVITY"), not long data labels
+                is_header = (
+                    first_cell
+                    and len(first_cell) <= 45
+                    and first_cell.isupper()
+                    and not re.match(r"^[\d,.\s\$\(\)\-%]+$", first_cell)
+                    and " AS OF " not in first_cell
+                    and "INCLUDING" not in first_cell
+                )
+                if is_header:
+                    sec_name = first_cell[:50]
+                    data_rows = []
+                    j = i + 1
+                    while j < len(rows):
+                        next_row = rows[j]
+                        next_first = (next_row[0] if next_row else "").strip()
+                        next_header = (
+                            next_first
+                            and len(next_first) <= 45
+                            and next_first.isupper()
+                            and not re.match(r"^[\d,.\s\$\(\)\-%]+$", next_first)
+                            and len(next_first) > 2
+                            and " AS OF " not in next_first
+                            and "INCLUDING" not in next_first
+                        )
+                        if next_header and data_rows:
+                            break
+                        data_rows.append(next_row)
+                        j += 1
+                    cleaned = _clean_table_rows(data_rows)
+                    data_rows = [_normalize_row(r) for r in cleaned]
+                    sections.append((sec_name, [sec_name], data_rows))
+                    added_this_page = True
+                    i = j
+                else:
+                    i += 1
+            if not added_this_page:
+                title = (rows[0][0] if rows and rows[0] else f"Page{page_num + 1}")[:50]
+                data_rows = [_normalize_row(r) for r in _clean_table_rows(rows[1:])]
+                sections.append((f"Page{page_num + 1}", [title], data_rows))
+    finally:
+        doc.close()
+    return sections
+
+
 def extract_sections_from_pdf(pdf_path: str) -> list[tuple[str, list, list]]:
     """
     Extract all tables/sections from the PDF in document order.
@@ -602,6 +766,14 @@ def extract_sections_from_pdf(pdf_path: str) -> list[tuple[str, list, list]]:
             heading_rows = [pending_title, *heading_rows]
             pending_title = None
         merged.append((sec_name, heading_rows, data_rows))
+
+    # Fallback: if pdfplumber got no real content, try PyMuPDF (many PDFs expose text to fitz only)
+    has_real_data = any(_section_has_data(dr) for _, _, dr in merged)
+    if not has_real_data:
+        pymupdf_sections = _extract_sections_from_pdf_pymupdf(pdf_path)
+        if pymupdf_sections:
+            log.info("Using PyMuPDF fallback (pdfplumber had no extractable text)")
+            merged = [s for s in pymupdf_sections if _section_has_data(s[2])]
     return merged
 
 
@@ -679,6 +851,92 @@ def _write_json_from_sections(sections: list[tuple], out: Path, overwrite: bool 
     log.info("Wrote %d section(s) to %s", len(sections), out)
 
 
+def load_sections_from_json(json_path: str | Path) -> list[tuple[str, list, list]]:
+    """
+    Load sections from a JSON file (same format we write).
+    Returns list of (section_name, heading_rows, data_rows) so you can build Excel from JSON.
+    """
+    path = Path(json_path)
+    if not path.exists():
+        raise FileNotFoundError(f"JSON not found: {path}")
+    with open(path, encoding="utf-8") as f:
+        payload = json.load(f)
+    sections_data = payload.get("sections") or []
+    out = []
+    for sec in sections_data:
+        name = sec.get("name") or ""
+        headings = sec.get("headings") or []
+        # _parse_summary_lines expects list of strings (one line per row)
+        heading_rows = [str(h).strip() for h in headings] if isinstance(headings, list) else []
+        rows = sec.get("rows") or []
+        data_rows = [r if isinstance(r, (list, tuple)) else [r] for r in rows]
+        out.append((name, heading_rows, data_rows))
+    return out
+
+
+def _write_sections_to_workbook(
+    sections: list[tuple[str, list, list]],
+    out_path: Path,
+    single_sheet: bool = False,
+) -> int:
+    """Build an Excel workbook from sections (same logic as pdf_tables_to_excel). Returns number of sheets."""
+    wb = Workbook()
+    wb.remove(wb.active)
+    if not sections:
+        ws = wb.create_sheet(title="Info")
+        ws.append(["No sections in this data."])
+        wb.save(out_path)
+        return 1
+    if single_sheet:
+        ws = wb.create_sheet(title="Extracted")
+        next_row = 1
+        for sec_name, heading_rows, data_rows in sections:
+            next_row = _write_section_to_sheet(ws, sec_name, heading_rows, data_rows, start_row=next_row)
+            next_row += 2
+        sheet_count = 1
+    else:
+        used_sheet_names = {}
+        for idx, (sec_name, heading_rows, data_rows) in enumerate(sections):
+            preferred = _preferred_sheet_name_from_title(sec_name)
+            if not preferred and heading_rows:
+                preferred = _preferred_sheet_name_from_title(heading_rows[0])
+            if preferred:
+                base = _safe_sheet_name(preferred, idx + 1)
+                count = used_sheet_names.get(base, 0) + 1
+                used_sheet_names[base] = count
+                name = _safe_sheet_name(f"{base.strip()} {count}" if count > 1 else base, idx + 1)
+            else:
+                name = _safe_sheet_name(sec_name, idx + 1)
+            ws = wb.create_sheet(title=name)
+            _write_section_to_sheet(ws, sec_name, heading_rows, data_rows)
+        sheet_count = len(sections)
+    wb.save(out_path)
+    return sheet_count
+
+
+def json_to_excel(
+    json_path: str | Path,
+    output_path: str | Path | None = None,
+    overwrite: bool = True,
+    single_sheet: bool = False,
+) -> str:
+    """
+    Produce an Excel file from a JSON file (sections + rows).
+    Pipeline: JSON is the canonical intermediate; Excel is built from it.
+    """
+    json_path = Path(json_path)
+    if not json_path.exists():
+        raise FileNotFoundError(f"JSON not found: {json_path}")
+    out = Path(output_path or json_path.with_suffix(".xlsx"))
+    if out.exists() and not overwrite:
+        raise FileExistsError(f"Output exists: {out}")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    sections = load_sections_from_json(json_path)
+    _write_sections_to_workbook(sections, out, single_sheet=single_sheet)
+    log.info("Wrote Excel from JSON: %s", out)
+    return str(out)
+
+
 def pdf_to_json(
     pdf_path: str,
     output_path: str | None = None,
@@ -743,10 +1001,9 @@ def pdf_tables_to_excel(
             raise ValueError("PDF could not be read (corrupt or invalid file).") from e
         raise
 
-    wb = Workbook()
-    wb.remove(wb.active)
-
     if not sections:
+        wb = Workbook()
+        wb.remove(wb.active)
         ws = wb.create_sheet(title="Info")
         ws.append(["No tables or structured data could be extracted from this PDF."])
         wb.save(out)
@@ -755,34 +1012,9 @@ def pdf_tables_to_excel(
         log.info("Wrote 1 sheet to %s", out)
         return str(out)
 
-    if single_sheet:
-        ws = wb.create_sheet(title="Extracted")
-        next_row = 1
-        for sec_name, heading_rows, data_rows in sections:
-            next_row = _write_section_to_sheet(ws, sec_name, heading_rows, data_rows, start_row=next_row)
-            next_row += 2  # blank rows between sections
-        sheet_count = 1
-    else:
-        # Prefer target-format sheet names (see EXPECTED_FORMAT.md) when section matches
-        used_sheet_names = {}
-        for idx, (sec_name, heading_rows, data_rows) in enumerate(sections):
-            preferred = _preferred_sheet_name_from_title(sec_name)
-            if not preferred and heading_rows:
-                preferred = _preferred_sheet_name_from_title(heading_rows[0])
-            if preferred:
-                base = _safe_sheet_name(preferred, idx + 1)
-                count = used_sheet_names.get(base, 0) + 1
-                used_sheet_names[base] = count
-                name = _safe_sheet_name(f"{base.strip()} {count}" if count > 1 else base, idx + 1)
-            else:
-                name = _safe_sheet_name(sec_name, idx + 1)
-            ws = wb.create_sheet(title=name)
-            _write_section_to_sheet(ws, sec_name, heading_rows, data_rows)
-        sheet_count = len(sections)
-
-    wb.save(out)
     if write_json and json_path:
         _write_json_from_sections(sections, Path(json_path), overwrite)
+    sheet_count = _write_sections_to_workbook(sections, out, single_sheet=single_sheet)
     log.info("Wrote %d sheet(s) to %s", sheet_count, out)
     return str(out)
 

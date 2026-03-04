@@ -16,8 +16,9 @@ def _get_version():
     return p.read_text().strip() if p.exists() else "0.0.0"
 
 # Project modules
-from tables_to_excel import pdf_tables_to_excel, pdf_to_json
+from tables_to_excel import pdf_tables_to_excel, pdf_to_json, json_to_excel
 from extract import extract_pdf_to_excel
+from pdf_to_qb import transform_extracted_to_qb
 import anthropic
 
 
@@ -82,6 +83,39 @@ def cmd_tables(args) -> int:
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
+    return 0
+
+
+def cmd_from_json(args) -> int:
+    """Convert a JSON file (from pdf→json) to Excel. Use after editing JSON to map tables correctly."""
+    json_path = Path(args.json_file)
+    if not json_path.exists():
+        print(f"Error: File not found: {json_path}", file=sys.stderr)
+        return 1
+    if json_path.suffix.lower() != ".json":
+        print("Error: File must be a .json file.", file=sys.stderr)
+        return 1
+    out = args.output or str(json_path.with_suffix(".xlsx"))
+    out_path = Path(out)
+    overwrite = not getattr(args, "no_overwrite", False)
+    if out_path.exists() and not overwrite:
+        print(f"Error: Output exists: {out_path} (use --overwrite to replace)", file=sys.stderr)
+        return 1
+    try:
+        import tempfile
+        from tables_to_excel import load_sections_from_json, _write_sections_to_workbook
+        sections = load_sections_from_json(json_path)
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            temp_xlsx = f.name
+        try:
+            _write_sections_to_workbook(sections, Path(temp_xlsx))
+            transform_extracted_to_qb(temp_xlsx, str(out_path))
+        finally:
+            Path(temp_xlsx).unlink(missing_ok=True)
+        print(f"Saved: {out_path}")
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -164,6 +198,12 @@ def main() -> int:
     p_json.add_argument("-o", "--output", default=None, help="Output .json path (single PDF only)")
     p_json.add_argument("--no-overwrite", action="store_true", help="Do not overwrite existing output")
     p_json.set_defaults(func=cmd_json)
+
+    p_from_json = sub.add_parser("from-json", help="Convert JSON (from pdf→json) to Excel; use after editing JSON to map tables")
+    p_from_json.add_argument("json_file", help="Path to .json file (extraction output)")
+    p_from_json.add_argument("-o", "--output", default=None, help="Output .xlsx path")
+    p_from_json.add_argument("--no-overwrite", action="store_true", help="Do not overwrite existing output")
+    p_from_json.set_defaults(func=cmd_from_json)
 
     # ask: PDF(s) + query
     p_ask = sub.add_parser("ask", help="AI agent: extract what you ask for from PDF(s)")
