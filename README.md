@@ -58,11 +58,21 @@ Alternatively: `python app.py` (runs with debug on port 5000).
   python run.py json report.pdf
   ```
 
-- **Ask AI** — Describe what you want (e.g. “taxes for January”) and get only that as Excel. Uses your `ANTHROPIC_API_KEY` in `.env`:
+- **Ask AI** — Describe what you want (e.g. “taxes for January”) and get only that as Excel. By default uses Anthropic (set `ANTHROPIC_API_KEY` in `.env`). For **fully offline** use, install the optional SmolLM deps and pass `--backend smollm`:
 
   ```bash
   python run.py ask report.pdf "taxes for January"
+  python run.py ask report.pdf "all tables" --backend smollm   # offline, no API key
   ```
+
+- **Offline AI (SmolLM)** — No API key. Uses a small local model (e.g. SmolLM2-360M). First run downloads the model (~700MB). Install optional deps then run:
+
+  ```bash
+  pip install -r requirements-offline.txt
+  python run.py ask report.pdf "summary table" --backend smollm
+  python -m extract_smollm report.pdf "extract all tables" -o out.xlsx   # or use module directly
+  ```
+  The PDF is converted to text locally (PyMuPDF); the model returns CSV from that text. Best for short documents and simple queries; for complex statements the non-AI `tables` command is usually better.
 
 Use `-o path/to/output.xlsx` to set the output path. If you don’t use `-o`, output is written to the **default output directory** (by default `output/`), with the same base name as the PDF and `.xlsx`. With multiple PDFs, each gets its own file in that directory. You can override the default directory by setting `OUTPUT_DIR` in `.env` (e.g. `OUTPUT_DIR=exports`).
 

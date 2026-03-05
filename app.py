@@ -9,9 +9,11 @@ Then open http://127.0.0.1:5000 — upload a PDF, get all tables as Excel.
 Extraction uses pdfplumber only; no raw data is sent to any cloud service.
 """
 
+import io
 import logging
 import os
 import tempfile
+import zipfile
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -101,13 +103,17 @@ def extract():
         log.info("extract: saved upload (mode=%s)", "ai" if use_ai else "offline")
 
         out_path = Path(tmp_dir) / "output.xlsx"
+        json_path = Path(tmp_dir) / "output.json"
         if use_ai:
             from config import load_config
             from extract import extract_pdf_to_excel
             cfg = load_config()
             result = extract_pdf_to_excel(str(pdf_path), query, str(out_path), config=cfg)
+            json_path = None  # AI path does not produce JSON in same format
         else:
-            result = pdf_to_qb_excel(str(pdf_path), str(out_path), overwrite=True)
+            result = pdf_to_qb_excel(
+                str(pdf_path), str(out_path), overwrite=True, json_path_out=str(json_path)
+            )
 
         if not Path(result).exists():
             log.error("extract: result file missing %s", result)
@@ -115,6 +121,19 @@ def extract():
             return redirect(url_for("index"))
 
         base_name = Path(file.filename).stem
+        if json_path and json_path.exists():
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.write(result, f"{base_name}.xlsx")
+                zf.write(json_path, f"{base_name}.json")
+            buf.seek(0)
+            log.info("extract: sending zip with %s.xlsx and %s.json", base_name, base_name)
+            return send_file(
+                buf,
+                as_attachment=True,
+                download_name=f"{base_name}.zip",
+                mimetype="application/zip",
+            )
         download_name = f"{base_name}.xlsx"
         log.info("extract: sending file %s", download_name)
         return send_file(

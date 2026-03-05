@@ -1,0 +1,7 @@
+# Optional: run the AI extraction fully offline with SmolLM (no API key).
+# Install after requirements.txt:  pip install -r requirements-offline.txt
+# Then:  python run.py ask report.pdf "your query" --backend smollm
+
+transformers>=4.36.0
+torch>=2.0.0
+accelerate>=0.25.0

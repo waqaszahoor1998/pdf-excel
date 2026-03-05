@@ -10,12 +10,18 @@ import json
 import logging
 import re
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger(__name__)
 
 import pdfplumber
+
+try:
+    import jsonschema
+except ImportError:
+    jsonschema = None  # optional: validate extraction JSON when present
 
 from config import load_qb_cleanup_config
 from openpyxl import Workbook
@@ -34,9 +40,9 @@ from openpyxl.utils import get_column_letter
 
 
 def _safe_sheet_name(name: str, fallback: int) -> str:
-    """Excel sheet names: max 31 chars, no \\ / * ? [ ] :"""
+    """Excel sheet names: max 31 chars (Excel limit), no \\ / * ? [ ] :"""
     s = (name or f"Sheet{fallback}").replace("\\", "").replace("/", "").replace("*", "").replace("?", "").replace("[", "").replace("]", "").replace(":", " ")
-    return s[:31] if s else f"Sheet{fallback}"
+    return (s[:31] if s else f"Sheet{fallback}")[:31]
 
 
 # Max vertical gap (pt) to consider text as "heading above" a table
@@ -115,15 +121,34 @@ def _preferred_sheet_name_from_title(text: str) -> str | None:
     return None
 
 
-def _cell_value(c) -> str | int | float:
+def _cell_looks_numeric(c) -> bool:
+    """True if cell parses as a number (for table-boundary detection: title-only rows have no number)."""
+    if c is None or (isinstance(c, str) and not c.strip()):
+        return False
+    if isinstance(c, (int, float, Decimal)) and not isinstance(c, bool):
+        return True
+    s = str(c).strip().lstrip("$€£\u00a0").replace(",", "")
+    if s.startswith("(") and s.endswith(")"):
+        s = s[1:-1].strip()
+    return bool(re.match(r"^-?\d+\.?\d*%?$|^-?\d+\.?\d*e[-+]?\d+$", s, re.I))
+
+
+def _cell_value(c) -> str | int | Decimal:
     """
     Prefer numeric type for Excel (so calculations work); otherwise return cleaned string.
     Strips $ € £ and commas; handles trailing %; parenthetical negatives (123.45); rounds to 2 decimals.
     """
     if c is None:
         return ""
-    if isinstance(c, (int, float)) and not isinstance(c, bool):
-        return round(c, 2) if isinstance(c, float) and c != int(c) else c
+    if isinstance(c, (int, float, Decimal)) and not isinstance(c, bool):
+        if isinstance(c, Decimal):
+            return c
+        if isinstance(c, float) and c != int(c):
+            try:
+                return Decimal(str(c)).quantize(Decimal("0.01"))
+            except Exception:
+                return c
+        return c if isinstance(c, int) else int(c)
     s = str(c).strip()
     if not s:
         return ""
@@ -131,17 +156,17 @@ def _cell_value(c) -> str | int | float:
     if s.startswith("(") and s.endswith(")"):
         inner = s[1:-1].strip().lstrip("$€£\u00a0").replace(",", "")
         try:
-            val = float(inner)
-            return round(-val, 2) if abs(val) >= 0.01 or val == 0 else -val
-        except ValueError:
+            val = Decimal(inner)
+            return -val.quantize(Decimal("0.01")) if abs(val) >= Decimal("0.01") or val == 0 else -val
+        except (ValueError, Exception):
             pass
     # "09 $24,157,595.24" or "24 $24,284,278.98" -> take the dollar amount part only
     m = re.match(r"^\d+\s+[\$€£]?\s*([\d,]+\.?\d*)\s*$", s)
     if m:
         try:
-            val = float(m.group(1).replace(",", ""))
-            return round(val, 2) if abs(val) >= 0.01 or val == 0 else val
-        except ValueError:
+            val = Decimal(m.group(1).replace(",", ""))
+            return val.quantize(Decimal("0.01")) if abs(val) >= Decimal("0.01") or val == 0 else val
+        except (ValueError, Exception):
             pass
     # Strip currency symbols and commas for parsing
     is_pct = s.endswith("%")
@@ -150,15 +175,15 @@ def _cell_value(c) -> str | int | float:
     clean = s.lstrip("$€£\u00a0").replace(",", "")
     try:
         if "." in clean or "e" in clean.lower():
-            val = float(clean)
+            val = Decimal(clean)
             if is_pct:
-                val = val / 100.0
-            if abs(val) >= 0.01 or val == 0:
-                val = round(val, 2)
+                val = val / 100
+            if abs(val) >= Decimal("0.01") or val == 0:
+                val = val.quantize(Decimal("0.01"))
             return val
         if clean.isdigit() or (clean.startswith("-") and clean[1:].isdigit()):
             return int(clean)
-    except ValueError:
+    except (ValueError, Exception):
         pass
     # Strip footnote/superscript markers from strings (e.g. E79271004¹ -> E79271004) for clean account IDs
     s = re.sub(r"[\u00B9\u00B2\u00B3\u2070-\u2079]+$", "", s)
@@ -178,7 +203,7 @@ def _merge_fragmented_row(cells: list) -> list:
     out = []
     for c in cells:
         s = (str(c) if c is not None else "").strip()
-        if s and isinstance(c, (int, float)) and not isinstance(c, bool):
+        if s and isinstance(c, (int, float, Decimal)) and not isinstance(c, bool):
             s = str(c)
         if not s:
             out.append("")
@@ -203,7 +228,7 @@ def _merge_fragmented_row(cells: list) -> list:
                     try:
                         rest_clean = rest.replace(",", "").lstrip("$€£")
                         if "." in rest_clean or re.search(r"\d", rest_clean):
-                            out.append(float(rest_clean) if "." in rest_clean else int(rest_clean))
+                            out.append(Decimal(rest_clean).quantize(Decimal("0.01")) if "." in rest_clean else int(rest_clean))
                         else:
                             out.append(rest)
                     except ValueError:
@@ -215,11 +240,12 @@ def _merge_fragmented_row(cells: list) -> list:
                 try:
                     clean_last = last.replace(",", "").lstrip("$€£")
                     combined = clean_last + s
-                    if "." in combined:
-                        out[-1] = float(combined)
+                    combined_clean = combined.replace(",", "")
+                    if "." in combined_clean:
+                        out[-1] = Decimal(combined_clean).quantize(Decimal("0.01"))
                     else:
-                        out[-1] = int(combined)
-                except ValueError:
+                        out[-1] = int(combined_clean)
+                except (ValueError, Exception):
                     out.append(s)
                 continue
             # Merge word fragments: last ends with letter (4+ chars), current is 1–2 letters only (e.g. "Beginni" + "n" + "g")
@@ -232,8 +258,8 @@ def _merge_fragmented_row(cells: list) -> list:
                 try:
                     combined = last + s  # "(37,30" + "3.03)" -> "(37,303.03)"
                     inner = combined[1:-1].strip().replace(",", "")
-                    val = float(inner)
-                    out[-1] = round(-val, 2) if abs(val) >= 0.01 or val == 0 else -val
+                    val = Decimal(inner)
+                    out[-1] = -val.quantize(Decimal("0.01")) if abs(val) >= Decimal("0.01") or val == 0 else -val
                 except ValueError:
                     out.append(s)
                 continue
@@ -567,7 +593,7 @@ def _write_section_to_sheet(ws, sec_name: str, heading_rows: list, data_rows: li
     # Data rows
     for r in table_rows[1:]:
         for col_idx, val in enumerate(r, start=1):
-            ws.cell(row=row_num, column=col_idx, value=_cell_value(val) if not isinstance(val, (int, float)) else val)
+            ws.cell(row=row_num, column=col_idx, value=_cell_value(val) if not isinstance(val, (int, float, Decimal)) else val)
         row_num += 1
 
     # Auto-fit column widths for this section's columns (only if we're the first section or single-sheet)
@@ -585,10 +611,123 @@ def _write_section_to_sheet(ws, sec_name: str, heading_rows: list, data_rows: li
     return row_num
 
 
+def extract_toc_from_pdf(pdf_path: str | Path) -> list[tuple[str, int]]:
+    """
+    Extract table-of-contents from the first page: (heading, page_number) for each TOC entry.
+    Looks for rows with a 'Page N' style second column (e.g. "General Information" / "Page 2").
+    Returns [] if no TOC found or PyMuPDF unavailable. Used to drive one sheet per TOC heading.
+    """
+    pdf_path = Path(pdf_path)
+    if not pdf_path.exists() or pdf_path.suffix.lower() != ".pdf":
+        return []
+    try:
+        import fitz
+    except ImportError:
+        return []
+    ROW_TOLERANCE = 5
+    COL_GAP = 15
+
+    def page_to_rows(page) -> list[list[str]]:
+        """Build list of rows; each row is list of cell strings."""
+        blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE).get("blocks") or []
+        items = []
+        for block in blocks:
+            for line in block.get("lines") or []:
+                for span in line.get("spans") or []:
+                    text = (span.get("text") or "").strip()
+                    if not text:
+                        continue
+                    bbox = span.get("bbox", (0, 0, 0, 0))
+                    x0, y0 = bbox[0], bbox[1]
+                    items.append((y0, x0, text))
+        if not items:
+            return []
+        items.sort(key=lambda t: (round(t[0] / ROW_TOLERANCE), t[1]))
+        rows = []
+        current_y = None
+        current_cells = []
+        for y0, x0, text in items:
+            y_key = round(y0 / ROW_TOLERANCE)
+            if current_y is not None and y_key != current_y:
+                if current_cells:
+                    rows.append([c for _, c in sorted(current_cells, key=lambda t: t[0])])
+                current_cells = []
+            current_y = y_key
+            if current_cells and abs(x0 - current_cells[-1][0]) < COL_GAP:
+                current_cells[-1] = (current_cells[-1][0], (current_cells[-1][1] + " " + text).strip())
+            else:
+                current_cells.append((x0, text))
+        if current_cells:
+            rows.append([c for _, c in sorted(current_cells, key=lambda t: t[0])])
+        return rows
+
+    toc = []
+    try:
+        doc = fitz.open(str(pdf_path))
+        if len(doc) == 0:
+            doc.close()
+            return []
+        page = doc[0]
+        rows = page_to_rows(page)
+        doc.close()
+    except Exception:
+        return []
+    # Find rows where last cell is "Page N" or just a digit (TOC page number)
+    page_re = re.compile(r"Page\s*(\d+)", re.I)
+    digits_only = re.compile(r"^\d+$")
+    for row in rows:
+        if not row or not isinstance(row, (list, tuple)) or len(row) < 2:
+            continue
+        page_num = None
+        col_idx = -1
+        last_cell = str(row[-1]).strip() if row else ""
+        if digits_only.match(last_cell):
+            page_num = int(last_cell)
+            col_idx = len(row) - 1
+        else:
+            for col_idx in range(len(row) - 1, -1, -1):
+                cell = (row[col_idx] if col_idx < len(row) else "") and str(row[col_idx]).strip()
+                if not cell:
+                    continue
+                m = page_re.search(cell)
+                if m:
+                    page_num = int(m.group(1))
+                    break
+        if page_num is None:
+            continue
+        # Heading = cell immediately before the page number (TOC section name)
+        if col_idx > 0:
+            heading = str(row[col_idx - 1]).strip()
+        else:
+            heading = " ".join(str(row[i]).strip() for i in range(col_idx) if i < len(row) and row[i]).strip()
+        if not heading or len(heading) > 80:
+            continue
+        # Skip document title, period, and account/portfolio ID row
+        if heading.upper().startswith("GS:") or heading.upper().startswith("PERIOD COVERING"):
+            continue
+        if "PORTFOLIO NO" in heading.upper() or "XXX-XX" in heading:
+            continue
+        # Skip if heading looks like a name/contact (e.g. "Brandon Geer, 310-...")
+        if re.search(r"\d{3}-\d{3}-\d{4}", heading) or heading.startswith("Suite ") or "Boulevard" in heading:
+            continue
+        toc.append((heading, page_num))
+    # Sort by page number; dedupe by heading (keep first)
+    seen_headings = set()
+    ordered = []
+    for h, p in sorted(toc, key=lambda x: x[1]):
+        key = h.strip().lower()
+        if key in seen_headings:
+            continue
+        seen_headings.add(key)
+        ordered.append((h, p))
+    return ordered
+
+
 def _extract_sections_from_pdf_pymupdf(pdf_path: Path) -> list[tuple[str, list, list]]:
     """
     Fallback when pdfplumber gets no text: use PyMuPDF (fitz) with layout.
     Uses get_text("dict") so we keep table structure: group spans by row (y), sort by x for columns.
+    Returns list of (sec_name, heading_rows, data_rows, page_num) when used for TOC-driven sheets.
     """
     try:
         import fitz
@@ -636,6 +775,23 @@ def _extract_sections_from_pdf_pymupdf(pdf_path: Path) -> list[tuple[str, list, 
             rows.append([c for _, c in sorted(current_cells, key=lambda t: t[0])])
         return rows
 
+    def _is_table_start_row(row) -> bool:
+        """True if row looks like a table section title only (no numeric in same row). Used for boundaries."""
+        if not row or not isinstance(row, (list, tuple)):
+            return False
+        first_cell = (row[0] if row else "").strip()
+        if not first_cell or len(first_cell) < 10 or len(first_cell) > 45:
+            return False
+        if not first_cell.isupper() or re.match(r"^[\d,.\s\$\(\)\-%]+$", first_cell):
+            return False
+        if " AS OF " in first_cell or "INCLUDING" in first_cell:
+            return False
+        # Title-only: no numeric value in the rest of the row (so "INTEREST RECEIVED", 221145.71 is not a new table)
+        rest = row[1:] if len(row) > 1 else []
+        if any(_cell_looks_numeric(c) for c in rest):
+            return False
+        return True
+
     sections = []
     doc = fitz.open(str(pdf_path))
     try:
@@ -644,53 +800,124 @@ def _extract_sections_from_pdf_pymupdf(pdf_path: Path) -> list[tuple[str, list, 
             rows = page_to_rows(page)
             if not rows:
                 continue
-            added_this_page = False
-            i = 0
-            while i < len(rows):
-                row = rows[i]
-                first_cell = (row[0] if row else "").strip()
-                # Section headers are short ALL CAPS (e.g. "PORTFOLIO ACTIVITY"), not long data labels
-                is_header = (
-                    first_cell
-                    and len(first_cell) <= 45
-                    and first_cell.isupper()
-                    and not re.match(r"^[\d,.\s\$\(\)\-%]+$", first_cell)
-                    and " AS OF " not in first_cell
-                    and "INCLUDING" not in first_cell
-                )
-                if is_header:
-                    sec_name = first_cell[:50]
-                    data_rows = []
-                    j = i + 1
-                    while j < len(rows):
-                        next_row = rows[j]
-                        next_first = (next_row[0] if next_row else "").strip()
-                        next_header = (
-                            next_first
-                            and len(next_first) <= 45
-                            and next_first.isupper()
-                            and not re.match(r"^[\d,.\s\$\(\)\-%]+$", next_first)
-                            and len(next_first) > 2
-                            and " AS OF " not in next_first
-                            and "INCLUDING" not in next_first
-                        )
-                        if next_header and data_rows:
-                            break
-                        data_rows.append(next_row)
-                        j += 1
-                    cleaned = _clean_table_rows(data_rows)
-                    data_rows = [_normalize_row(r) for r in cleaned]
-                    sections.append((sec_name, [sec_name], data_rows))
-                    added_this_page = True
-                    i = j
-                else:
-                    i += 1
-            if not added_this_page:
-                title = (rows[0][0] if rows and rows[0] else f"Page{page_num + 1}")[:50]
+            # Find table boundaries: rows that are section titles only (no data in same row)
+            starts = [i for i, row in enumerate(rows) if _is_table_start_row(row)]
+            for k, i in enumerate(starts):
+                sec_name = (rows[i][0] if rows[i] else "").strip()[:50]
+                end_i = starts[k + 1] if k + 1 < len(starts) else len(rows)
+                data_rows = rows[i + 1 : end_i]
+                # Prepend any rows before the first table on this page (e.g. "TOTAL PORTFOLIO: ..." with value)
+                if k == 0 and i > 0:
+                    data_rows = rows[0:i] + data_rows
+                cleaned = _clean_table_rows(data_rows)
+                data_rows = [_normalize_row(r) for r in cleaned]
+                if data_rows:  # only emit if there is content
+                    sections.append((sec_name, [sec_name], data_rows, page_num + 1))
+            if not starts and rows:
+                # No table-start row on page: one block with all rows (e.g. continuation)
+                raw_title = (rows[0][0] if rows and rows[0] else "")
+                title = (str(raw_title).strip()[:50] if raw_title else f"Page{page_num + 1}")
+                if len(title) < 5:
+                    title = f"Page{page_num + 1}"
                 data_rows = [_normalize_row(r) for r in _clean_table_rows(rows[1:])]
-                sections.append((f"Page{page_num + 1}", [title], data_rows))
+                if data_rows:
+                    sections.append((f"Page{page_num + 1}", [title], data_rows, page_num + 1))
     finally:
         doc.close()
+    return sections
+
+
+def _score_sections(sections: list[tuple[str, list, list]]) -> float:
+    """
+    Score extraction result for comparison. Higher = better.
+    total_data_rows + 2 * num_table_like_sections - penalty for inconsistent column counts.
+    Table-like = any section with at least one row (single-row summaries and key-value rows count).
+    """
+    if not sections:
+        return 0.0
+    total_rows = 0
+    table_like = 0
+    inconsistent = 0
+    for s in sections:
+        _name, _headings, data_rows = s[0], s[1], s[2]
+        if not data_rows:
+            continue
+        total_rows += len(data_rows)
+        # Any row/column structure with data counts as table (including 1 row × N columns)
+        if len(data_rows) >= 1:
+            table_like += 1
+        header_len = len(data_rows[0]) if data_rows[0] else 0
+        for r in data_rows[1:]:
+            row_len = len(r) if isinstance(r, (list, tuple)) else 0
+            if header_len and row_len != header_len:
+                inconsistent += 1
+    penalty = min(inconsistent * 2, total_rows)  # cap penalty
+    return total_rows + 2.0 * table_like - penalty
+
+
+def _extract_sections_from_pdf_camelot(pdf_path: Path) -> list[tuple[str, list, list]]:
+    """Extract tables using Camelot. Returns list of (section_name, heading_rows, data_rows). On failure returns []."""
+    try:
+        import camelot
+    except ImportError:
+        log.debug("Camelot not installed; skip Camelot extraction")
+        return []
+    sections = []
+    try:
+        # Try lattice first (bordered tables), then stream (whitespace-separated)
+        for flavor in ("lattice", "stream"):
+            try:
+                tables = camelot.read_pdf(str(pdf_path), pages="all", flavor=flavor)
+                break
+            except Exception:
+                continue
+        else:
+            return []
+        for i, t in enumerate(tables):
+            try:
+                df = t.df
+                if df is None or df.empty:
+                    continue
+                rows = df.astype(str).values.tolist()
+                page = getattr(t, "page", i + 1)
+                name = f"Page{page}_Camelot_{i + 1}"
+                cleaned = _clean_table_rows(rows)
+                data_rows = [_normalize_row(r) for r in cleaned]
+                if data_rows:
+                    sections.append((name, [name], data_rows))
+            except Exception as e:
+                log.debug("Camelot table %s skip: %s", i, e)
+    except Exception as e:
+        log.warning("Camelot extraction failed: %s", e)
+    return sections
+
+
+def _extract_sections_from_pdf_tabula(pdf_path: Path) -> list[tuple[str, list, list]]:
+    """Extract tables using Tabula (requires Java). Returns list of (section_name, heading_rows, data_rows). On failure returns []."""
+    try:
+        import tabula
+    except ImportError:
+        log.debug("Tabula not installed; skip Tabula extraction")
+        return []
+    sections = []
+    try:
+        dfs = tabula.read_pdf(str(pdf_path), pages="all", multiple_tables=True)
+        if not dfs:
+            return []
+        for i, df in enumerate(dfs):
+            try:
+                if df is None or df.empty:
+                    continue
+                rows = df.astype(str).values.tolist()
+                name = f"Tabula_{i + 1}"
+                cleaned = _clean_table_rows(rows)
+                data_rows = [_normalize_row(r) for r in cleaned]
+                if data_rows:
+                    sections.append((name, [name], data_rows))
+            except Exception as e:
+                log.debug("Tabula table %s skip: %s", i, e)
+    except Exception as e:
+        log.warning("Tabula extraction failed: %s", e)
     return sections
 
 
@@ -699,6 +926,10 @@ def extract_sections_from_pdf(pdf_path: str) -> list[tuple[str, list, list]]:
     Extract all tables/sections from the PDF in document order.
     Returns list of (section_name, heading_rows, data_rows).
     Same structure used for Excel and JSON; no file is written.
+
+    A "table" is any row/column layout with values: multi-row grids, single-row summaries,
+    key-value lines, and calculation breakdowns. There is no minimum row count; one row
+    with multiple columns (e.g. a summary line) is kept.
     """
     pdf_path = Path(pdf_path)
     if not pdf_path.exists():
@@ -715,7 +946,7 @@ def extract_sections_from_pdf(pdf_path: str) -> list[tuple[str, list, list]]:
             used_sections = False
             if hasattr(page, "extract_text_lines"):
                 for sec_name, heading_rows, data_rows in _page_sections_with_headings(page, page_num):
-                    sections.append((sec_name, heading_rows, [_normalize_row(r) for r in data_rows]))
+                    sections.append((sec_name, heading_rows, [_normalize_row(r) for r in data_rows], page_num))
                     used_sections = True
             if not used_sections:
                 tables = page.extract_tables()
@@ -727,7 +958,7 @@ def extract_sections_from_pdf(pdf_path: str) -> list[tuple[str, list, list]]:
                         heading_rows = [name]
                         cleaned = _clean_table_rows(table)
                         data_rows = [_normalize_row(r) for r in cleaned]
-                        sections.append((name, heading_rows, data_rows))
+                        sections.append((name, heading_rows, data_rows, page_num))
                 else:
                     text = page.extract_text()
                     if text and text.strip():
@@ -740,11 +971,12 @@ def extract_sections_from_pdf(pdf_path: str) -> list[tuple[str, list, list]]:
                                 rows.append(parts if len(parts) > 1 else [line])
                             rows = _clean_table_rows(rows)
                             data_rows = [_normalize_row(r) for r in rows]
-                            sections.append((f"Page{page_num}", [heading], data_rows))
+                            sections.append((f"Page{page_num}", [heading], data_rows, page_num))
                     else:
-                        sections.append((f"Page{page_num}", ["(No text extracted from this page)"], []))
+                        sections.append((f"Page{page_num}", ["(No text extracted from this page)"], [], page_num))
 
     def _section_has_data(data_rows):
+        """True if section has any non-empty cell. Keeps single-row tables (e.g. summary lines, key-value rows)."""
         if not data_rows:
             return False
         for r in data_rows:
@@ -757,30 +989,61 @@ def extract_sections_from_pdf(pdf_path: str) -> list[tuple[str, list, list]]:
 
     merged = []
     pending_title = None
-    for sec_name, heading_rows, data_rows in sections:
+    for s in sections:
+        sec_name = s[0]
+        heading_rows = s[1]
+        data_rows = s[2]
+        page_num = s[3] if len(s) >= 4 else None
         if not _section_has_data(data_rows):
+            log.debug("section=%s rows=0 skipped (no data)", sec_name[:50] if sec_name else "(unnamed)")
             if heading_rows and heading_rows[0].strip():
                 pending_title = heading_rows[0].strip() if not pending_title else f"{pending_title} — {heading_rows[0].strip()}"
             continue
         if pending_title:
             heading_rows = [pending_title, *heading_rows]
             pending_title = None
-        merged.append((sec_name, heading_rows, data_rows))
+        log.debug("section=%s rows=%d", (sec_name or "")[:50], len(data_rows))
+        if page_num is not None:
+            merged.append((sec_name, heading_rows, data_rows, page_num))
+        else:
+            merged.append((sec_name, heading_rows, data_rows))
 
     # Fallback: if pdfplumber got no real content, try PyMuPDF (many PDFs expose text to fitz only)
-    has_real_data = any(_section_has_data(dr) for _, _, dr in merged)
+    has_real_data = any(_section_has_data(s[2]) for s in merged)
     if not has_real_data:
         pymupdf_sections = _extract_sections_from_pdf_pymupdf(pdf_path)
         if pymupdf_sections:
             log.info("Using PyMuPDF fallback (pdfplumber had no extractable text)")
             merged = [s for s in pymupdf_sections if _section_has_data(s[2])]
-    return merged
+
+    # Multi-extractor comparison: run Camelot and Tabula, score all candidates, pick best
+    candidates = [("pdfplumber/PyMuPDF", merged)]
+    camelot_sections = _extract_sections_from_pdf_camelot(pdf_path)
+    if camelot_sections:
+        candidates.append(("Camelot", camelot_sections))
+    tabula_sections = _extract_sections_from_pdf_tabula(pdf_path)
+    if tabula_sections:
+        candidates.append(("Tabula", tabula_sections))
+
+    best_name = candidates[0][0]
+    best_sections = candidates[0][1]
+    best_score = _score_sections(best_sections)
+    for name, secs in candidates[1:]:
+        score = _score_sections(secs)
+        if score > best_score:
+            best_score = score
+            best_name = name
+            best_sections = secs
+    log.info("Extractor comparison: %s selected (score=%.0f)", best_name, best_score)
+    return best_sections
 
 
 def _cell_to_json(c):
-    """One cell to a JSON-safe value."""
+    """One cell to a JSON-safe value. Decimal -> float for JSON."""
     if c is None:
         return None
+    if isinstance(c, Decimal):
+        return float(c)
     if isinstance(c, (int, float)) and not isinstance(c, bool):
         return c
     s = str(c).strip()
@@ -809,9 +1072,11 @@ def _build_header_grid(rows: list[list]) -> dict | None:
 
 
 def _sections_to_json_serializable(sections: list[tuple]) -> list[dict]:
-    """Turn (name, heading_rows, data_rows) into list of dicts safe for JSON (no tuples, consistent types)."""
+    """Turn (name, heading_rows, data_rows[, page_num]) into list of dicts safe for JSON (no tuples, consistent types)."""
     out = []
-    for sec_name, heading_rows, data_rows in sections:
+    for s in sections:
+        sec_name, heading_rows, data_rows = s[0], s[1], s[2]
+        page_num = s[3] if len(s) >= 4 else None
         # Headings: list of strings (first line can be section title)
         headings = []
         for h in (heading_rows or []):
@@ -826,6 +1091,8 @@ def _sections_to_json_serializable(sections: list[tuple]) -> list[dict]:
             cells = [_cell_to_json(c) for c in row]
             rows.append(cells)
         section_dict = {"name": str(sec_name), "headings": headings, "rows": rows}
+        if page_num is not None:
+            section_dict["page"] = page_num
         # Grid size for verification: how many rows/columns were extracted
         section_dict["row_count"] = len(rows)
         section_dict["column_count"] = len(rows[0]) if rows else 0
@@ -840,6 +1107,64 @@ def _sections_to_json_serializable(sections: list[tuple]) -> list[dict]:
     return out
 
 
+def _looks_like_table(sec_name: str, heading_rows: list, data_rows: list) -> bool:
+    """
+    True if section looks like a table (rows/columns with values). Drops long prose and junk.
+    Keeps: multiple columns, or multiple rows with values; drops sections that are mostly paragraphs.
+    """
+    if not data_rows:
+        return False
+    total_cells = 0
+    max_cells_in_row = 0
+    has_numeric = False
+    long_single_cell = 0
+    rows_with_long_text = 0  # row with any cell > 100 chars (prose)
+    for r in data_rows:
+        row = r if isinstance(r, (list, tuple)) else [r]
+        nc = len([c for c in row if c is not None and str(c).strip()])
+        total_cells += nc
+        max_cells_in_row = max(max_cells_in_row, nc)
+        for c in row:
+            if c is not None and _cell_looks_numeric(c):
+                has_numeric = True
+            if c is not None:
+                s = str(c).strip()
+                if len(s) > 200:
+                    long_single_cell += 1
+                if len(s) > 100:
+                    rows_with_long_text += 1
+                    break
+    # Drop if it's just one long paragraph (single-cell section with 200+ char)
+    if max_cells_in_row <= 1 and long_single_cell > 0:
+        return False
+    # Drop if mostly long paragraphs (e.g. disclaimer blocks)
+    if rows_with_long_text > len(data_rows) / 2:
+        return False
+    # Keep if structured: at least 2 cells in some row, or 2+ rows with at least one value
+    if max_cells_in_row >= 2:
+        return True
+    if len(data_rows) >= 2 and total_cells >= 2:
+        return True
+    if len(data_rows) == 1 and total_cells >= 1 and has_numeric:
+        return True  # single row with label + value(s)
+    return False
+
+
+def filter_sections_to_tables_only(sections: list[tuple]) -> list[tuple]:
+    """Keep only sections that look like tables (drop long prose and non-table content). Preserves page num if present (4-tuple)."""
+    out = []
+    for s in sections:
+        sec_name, heading_rows, data_rows = s[0], s[1], s[2]
+        if _looks_like_table(sec_name, heading_rows, data_rows):
+            if len(s) >= 4:
+                out.append((sec_name, heading_rows, data_rows, s[3]))
+            else:
+                out.append((sec_name, heading_rows, data_rows))
+        else:
+            log.debug("skip non-table section=%s rows=%d", (sec_name or "")[:40], len(data_rows or []))
+    return out
+
+
 def _write_json_from_sections(sections: list[tuple], out: Path, overwrite: bool = True) -> None:
     """Write sections to a JSON file (used for one-stream Excel + JSON output)."""
     if out.exists() and not overwrite:
@@ -849,37 +1174,146 @@ def _write_json_from_sections(sections: list[tuple], out: Path, overwrite: bool 
     with open(out, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
     log.info("Wrote %d section(s) to %s", len(sections), out)
+    for s in sections:
+        log.debug("json section=%s rows=%d", (s[0] or "")[:50], len((s[2] or [])))
+
+
+# Schema for extraction JSON (sections with name, headings, rows). Used to validate before Excel.
+_EXTRACTION_JSON_SCHEMA = {
+    "type": "object",
+    "required": ["sections"],
+    "properties": {
+        "sections": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["name", "headings", "rows"],
+                "properties": {
+                    "name": {"type": "string"},
+                    "headings": {"type": "array", "items": {"type": "string"}},
+                    "rows": {
+                        "type": "array",
+                        "items": {
+                            "type": "array",
+                            "items": {"type": ["string", "number", "null"]},
+                        },
+                    },
+                    "row_count": {"type": "integer"},
+                    "column_count": {"type": "integer"},
+                },
+                "additionalProperties": True,
+            },
+        },
+    },
+    "additionalProperties": True,
+}
+
+
+def validate_extraction_json(payload: dict) -> None:
+    """
+    Validate extraction JSON against schema. Raises ValueError if invalid.
+    Ensures sections have name, headings, rows so we don't write malformed data to Excel.
+    """
+    if jsonschema is None:
+        return
+    try:
+        jsonschema.validate(instance=payload, schema=_EXTRACTION_JSON_SCHEMA)
+    except jsonschema.ValidationError as e:
+        raise ValueError(f"Extraction JSON validation failed: {e}") from e
+
+
+def _clean_loaded_cell(c):
+    """Data cleaning: trim strings, leave numbers/null as-is. Used after load from JSON."""
+    if c is None:
+        return None
+    if isinstance(c, (int, float, Decimal)) and not isinstance(c, bool):
+        return c
+    s = str(c).strip()
+    return s if s else None
+
+
+def _is_numeric_cell(c) -> bool:
+    """True if cell value is numeric (int, float, Decimal)."""
+    return isinstance(c, (int, float, Decimal)) and not isinstance(c, bool)
+
+
+def validate_sections(
+    sections: list[tuple[str, list, list]],
+) -> tuple[list[str], bool]:
+    """
+    Run validation on extracted sections. Returns (list of error messages, requires_review).
+    - Inconsistent column count per section -> error + needs_review.
+    - Optional: Total row sum vs sum of detail rows (when detectable).
+    """
+    errors = []
+    requires_review = False
+    for s in sections:
+        sec_name, _headings, data_rows = s[0], s[1], s[2]
+        if not data_rows:
+            continue
+        header_len = len(data_rows[0]) if data_rows[0] else 0
+        for i, row in enumerate(data_rows[1:], start=1):
+            row_len = len(row) if isinstance(row, (list, tuple)) else 0
+            if header_len and row_len != header_len:
+                err = f"section={sec_name[:40]!r} row={i+1} column_count={row_len} != header_count={header_len}"
+                errors.append(err)
+                requires_review = True
+    return (errors, requires_review)
+
+
+def _clean_loaded_sections(sections: list[tuple]) -> list[tuple]:
+    """
+    Data cleaning layer: trim string cells in loaded sections before Excel.
+    Reduces noise from extra spaces; keeps numbers and structure unchanged. Preserves page if 4-tuple.
+    """
+    out = []
+    for s in sections:
+        name, heading_rows, data_rows = s[0], s[1], s[2]
+        clean_headings = [_clean_loaded_cell(h) or "" for h in (heading_rows or [])]
+        clean_rows = []
+        for r in data_rows or []:
+            row = r if isinstance(r, (list, tuple)) else [r]
+            clean_rows.append([_clean_loaded_cell(c) for c in row])
+        if len(s) >= 4:
+            out.append((name, clean_headings, clean_rows, s[3]))
+        else:
+            out.append((name, clean_headings, clean_rows))
+    return out
 
 
 def load_sections_from_json(json_path: str | Path) -> list[tuple[str, list, list]]:
     """
     Load sections from a JSON file (same format we write).
-    Returns list of (section_name, heading_rows, data_rows) so you can build Excel from JSON.
+    Validates payload against schema, then applies data cleaning (trim strings). Returns (section_name, heading_rows, data_rows).
     """
     path = Path(json_path)
     if not path.exists():
         raise FileNotFoundError(f"JSON not found: {path}")
     with open(path, encoding="utf-8") as f:
         payload = json.load(f)
+    validate_extraction_json(payload)
     sections_data = payload.get("sections") or []
     out = []
     for sec in sections_data:
-        name = sec.get("name") or ""
+        name = (sec.get("name") or "").strip()
         headings = sec.get("headings") or []
-        # _parse_summary_lines expects list of strings (one line per row)
         heading_rows = [str(h).strip() for h in headings] if isinstance(headings, list) else []
         rows = sec.get("rows") or []
         data_rows = [r if isinstance(r, (list, tuple)) else [r] for r in rows]
-        out.append((name, heading_rows, data_rows))
-    return out
+        page = sec.get("page")
+        if page is not None:
+            out.append((name, heading_rows, data_rows, int(page)))
+        else:
+            out.append((name, heading_rows, data_rows))
+    return _clean_loaded_sections(out)
 
 
 def _write_sections_to_workbook(
-    sections: list[tuple[str, list, list]],
+    sections: list[tuple],
     out_path: Path,
     single_sheet: bool = False,
 ) -> int:
-    """Build an Excel workbook from sections (same logic as pdf_tables_to_excel). Returns number of sheets."""
+    """Build an Excel workbook from sections (same logic as pdf_tables_to_excel). Sections may be 3- or 4-tuples (page ignored). Returns number of sheets."""
     wb = Workbook()
     wb.remove(wb.active)
     if not sections:
@@ -890,13 +1324,15 @@ def _write_sections_to_workbook(
     if single_sheet:
         ws = wb.create_sheet(title="Extracted")
         next_row = 1
-        for sec_name, heading_rows, data_rows in sections:
+        for s in sections:
+            sec_name, heading_rows, data_rows = s[0], s[1], s[2]
             next_row = _write_section_to_sheet(ws, sec_name, heading_rows, data_rows, start_row=next_row)
             next_row += 2
         sheet_count = 1
     else:
         used_sheet_names = {}
-        for idx, (sec_name, heading_rows, data_rows) in enumerate(sections):
+        for idx, s in enumerate(sections):
+            sec_name, heading_rows, data_rows = s[0], s[1], s[2]
             preferred = _preferred_sheet_name_from_title(sec_name)
             if not preferred and heading_rows:
                 preferred = _preferred_sheet_name_from_title(heading_rows[0])
@@ -904,11 +1340,18 @@ def _write_sections_to_workbook(
                 base = _safe_sheet_name(preferred, idx + 1)
                 count = used_sheet_names.get(base, 0) + 1
                 used_sheet_names[base] = count
-                name = _safe_sheet_name(f"{base.strip()} {count}" if count > 1 else base, idx + 1)
+                if count > 1:
+                    # Keep base + " " + count within 31 chars so Excel accepts the file
+                    suffix = f" {count}"
+                    base = (base.strip() or base)[: 31 - len(suffix)]
+                    name = _safe_sheet_name(f"{base}{suffix}", idx + 1)
+                else:
+                    name = base
             else:
                 name = _safe_sheet_name(sec_name, idx + 1)
-            ws = wb.create_sheet(title=name)
+            ws = wb.create_sheet(title=name[:31])
             _write_section_to_sheet(ws, sec_name, heading_rows, data_rows)
+            log.debug("excel sheet=%s section=%s rows=%d", name, (sec_name or "")[:40], len(data_rows or []))
         sheet_count = len(sections)
     wb.save(out_path)
     return sheet_count

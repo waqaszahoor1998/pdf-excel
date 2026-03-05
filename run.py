@@ -18,8 +18,7 @@ def _get_version():
 # Project modules
 from tables_to_excel import pdf_tables_to_excel, pdf_to_json, json_to_excel
 from extract import extract_pdf_to_excel
-from pdf_to_qb import transform_extracted_to_qb
-import anthropic
+from pdf_to_qb import pdf_to_qb_excel, transform_extracted_to_qb
 
 
 def _expand_pdfs(paths):
@@ -70,12 +69,11 @@ def cmd_tables(args) -> int:
             print(f"[{i+1}/{len(pdfs)}] {pdf}")
         try:
             out_path = Path(out)
-            result = pdf_tables_to_excel(
+            result = pdf_to_qb_excel(
                 str(pdf),
                 out,
                 overwrite=overwrite,
-                write_json=True,
-                json_path=out_path.with_suffix(".json"),
+                json_path_out=str(out_path.with_suffix(".json")),
             )
             print(f"Saved: {result}")
             if out_path.with_suffix(".json").exists():
@@ -158,21 +156,23 @@ def cmd_ask(args) -> int:
         if len(pdfs) > 1:
             print(f"[{i+1}/{len(pdfs)}] {pdf}")
         try:
-            from config import load_config
-            cfg = load_config()
-            result = extract_pdf_to_excel(str(pdf), args.query, out, model=args.model, config=cfg)
+            backend = getattr(args, "backend", "anthropic")
+            if backend == "smollm":
+                from extract_smollm import extract_pdf_to_excel as smollm_extract
+                result = smollm_extract(str(pdf), args.query, out, model_name=getattr(args, "smollm_model", "HuggingFaceTB/SmolLM2-360M-Instruct"))
+            else:
+                from config import load_config
+                cfg = load_config()
+                result = extract_pdf_to_excel(str(pdf), args.query, out, model=args.model, config=cfg)
             print(f"Saved: {result}")
-        except anthropic.APIError as e:
+        except Exception as e:
             msg = str(e).lower()
-            if "401" in msg or "auth" in msg:
+            if "401" in msg or "auth" in msg or "invalid_api_key" in msg:
                 print("Error: Invalid or missing API key. Set ANTHROPIC_API_KEY in .env.", file=sys.stderr)
             elif "429" in msg or "rate" in msg:
                 print("Error: API rate limit exceeded. Try again later.", file=sys.stderr)
             else:
-                print(f"Error: API request failed. {e}", file=sys.stderr)
-            return 1
-        except Exception as e:
-            print(f"Error: {e}", file=sys.stderr)
+                print(f"Error: {e}", file=sys.stderr)
             return 1
     return 0
 
@@ -210,7 +210,9 @@ def main() -> int:
     p_ask.add_argument("pdf", nargs="+", help="PDF file(s) or directory containing PDFs")
     p_ask.add_argument("query", help="What to extract, e.g. 'company taxes for January 2026'")
     p_ask.add_argument("-o", "--output", default=None, help="Output .xlsx path (single PDF only)")
-    p_ask.add_argument("--model", default="claude-sonnet-4-20250514", help="Anthropic model")
+    p_ask.add_argument("--backend", choices=("anthropic", "smollm"), default="anthropic", help="AI backend: anthropic (API) or smollm (offline local)")
+    p_ask.add_argument("--model", default="claude-sonnet-4-20250514", help="Anthropic model (when backend=anthropic)")
+    p_ask.add_argument("--smollm-model", default="HuggingFaceTB/SmolLM2-360M-Instruct", help="HuggingFace model name (when backend=smollm)")
     p_ask.set_defaults(func=cmd_ask)
 
     args = parser.parse_args()

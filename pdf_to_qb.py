@@ -9,10 +9,14 @@ Pipeline: PDF → (tables_to_excel) → raw xlsx → (this module) → QB-format
 - Preserves table structure; merges duplicate section types into one sheet per type.
 """
 
+import logging
 import re
+from decimal import Decimal
 from pathlib import Path
 
 from openpyxl import Workbook
+
+log = logging.getLogger(__name__)
 from openpyxl.styles import Font, PatternFill
 
 from config import load_qb_cleanup_config
@@ -27,30 +31,6 @@ FILL_SECTION_HEADER = PatternFill(fill_type="solid", fgColor="92D050")   # Light
 FILL_TABLE_HEADER = PatternFill(fill_type="solid", fgColor="D9E1F2")    # Light blue – column header row
 FILL_FORMULA = PatternFill(fill_type="solid", fgColor="FFFF00")         # Yellow – formulas / check cells
 FILL_TOTALS = PatternFill(fill_type="solid", fgColor="FFC000")          # Orange – totals / emphasis
-
-# Target sheet names we want in QB format (order for creation)
-QB_SHEET_ORDER = [
-    "Period Summary",
-    "Account Summary",
-    "Consolidated Summary",
-    "Asset Allocation",
-    "Portfolio Activity",
-    "Tax Summary",
-    "Cash & Fixed Income",
-    "Equity Summary",
-    "Equity Detail",
-    "Net Assets",
-    "Operations",
-    "Partner Capital",
-    "PLSummary",
-    "Journal Entry Import",
-    "Journal Entries",
-    "Unrealized",
-    "Change in Dividend",
-    "Change in Interest",
-    "Alt Inv Transfer",
-]
-
 
 # Section titles that start a new block in per-account sheets (first cell match, case-insensitive)
 _PER_ACCOUNT_SECTION_PATTERNS = re.compile(
@@ -140,27 +120,35 @@ def _split_rows_by_section(rows: list[list]) -> list[tuple[str, list[list]]]:
 
 
 def _target_sheet_name(source_name: str) -> str:
-    """Map extracted sheet name to QB target sheet name (for grouping)."""
+    """
+    Normalize extracted sheet name for grouping. No fixed list: use document names.
+    Only collapse to 'Other' when the name looks like a data row (e.g. long, starts with digit/coupon).
+    """
     s = (source_name or "").strip()
     if not s:
         return "Other"
     # Strip trailing " 2", " 3", "_1", "_11" etc.
     base = re.sub(r"\s+\d+$", "", s)
     base = re.sub(r"_\d+$", "", base)
-    # If base is a known QB name, use it
-    if base in QB_SHEET_ORDER:
-        return base
-    # "PLSummary J.P. Morgan Chase" or similar -> "PLSummary"
+    # Merge "Page1", "Page2", ... into one sheet
+    if re.match(r"^Page\d+$", base, re.I):
+        return "By Page"
+    # "PLSummary J.P. Morgan Chase" or similar
     if "plsummary" in base.lower() or "mtd pnl" in s.lower():
         return "PLSummary"
-    # Per-account pattern: "ABC TRUST ACCT. E79271004_1" -> "Account E79271004" (merge all pages for same account)
+    # Per-account pattern: "ABC TRUST ACCT. E79271004_1" -> "Account E79271004"
     m = re.search(r"ACCT\.\s*([A-Z0-9]+)", s, re.I)
     if m:
         return f"Account {m.group(1)}"
-    # JPMorgan / broker header as sheet name -> "Broker Info"
+    # Broker header
     if "JPMorgan" in s or "J.P. Morgan" in s or "Chase Bank" in s:
         return "Broker Info"
-    return base or s
+    # Use document name unless it looks like a detail row (bond name, coupon, long string) -> group into Other
+    if len(base) > 50:
+        return "Other"
+    if re.match(r"^\d", base) or re.match(r"^0\.\d", base):
+        return "Other"
+    return base
 
 
 def _rows_from_sheet(ws) -> list[list]:
@@ -169,9 +157,10 @@ def _rows_from_sheet(ws) -> list[list]:
 
 
 def _safe_sheet_name(name: str, max_len: int = 31) -> str:
-    """Excel sheet name: no \\ / * ? [ ]"""
+    """Excel sheet name: max 31 chars (Excel limit), no \\ / * ? [ ]"""
     s = (name or "Sheet").replace("\\", "").replace("/", "").replace("*", "").replace("?", "").replace("[", "").replace("]", "")
-    return (s[:max_len] if s else "Sheet").strip() or "Sheet"
+    s = (s[:max_len] if s else "Sheet").strip() or "Sheet"
+    return s[:31]  # enforce Excel limit even if max_len was overridden
 
 
 def _fill_row(ws, row: int, num_cols: int, fill: PatternFill) -> None:
@@ -334,7 +323,7 @@ def _looks_like_account_summary_data_row(r: list) -> bool:
         if idx >= len(cells):
             continue
         v = cells[idx]
-        if isinstance(v, (int, float)):
+        if isinstance(v, (int, float, Decimal)):
             return True
         s = str(v or "").strip().replace("\u00b9", "").replace("\u00b2", "").replace(",", "")
         if s and s.replace(".", "").replace("-", "").isdigit():
@@ -443,7 +432,7 @@ def _row_has_table_data(row: list) -> bool:
             continue
         if _is_account_id(s):
             return True
-        if isinstance(c, (int, float)):
+        if isinstance(c, (int, float, Decimal)):
             return True  # include 0 so account rows with zeros are kept
         if re.search(r"\$[\s\d,]+\.?\d*|[\d,]{3,}\.\d{2}", s):
             return True
@@ -513,12 +502,204 @@ def _is_prose_row(row: list) -> bool:
     return False
 
 
-def transform_extracted_to_qb(extracted_xlsx_path: str, output_path: str) -> str:
+def _infer_sheets_from_first_section_per_page(sections: list[tuple]) -> tuple[list[str], dict[str, list]]:
+    """
+    No TOC: infer sheet boundaries from the document. For each page, the first section
+    (in document order) is the 'page heading'. Consecutive pages with the same
+    first-section name form one sheet; all sections on those pages go to that sheet.
+    Returns (ordered_sheet_names, by_sheet). Sections must have page_num (4-tuple).
+    """
+    from collections import defaultdict
+
+    if not sections:
+        return ([], {})
+    # Require page numbers
+    has_page = any(len(s) >= 4 and s[3] is not None for s in sections)
+    if not has_page:
+        return ([], {})
+
+    # (page_num -> list of (index, section)) in document order
+    by_page: dict[int, list[tuple[int, tuple]]] = defaultdict(list)
+    for i, s in enumerate(sections):
+        if len(s) >= 4 and s[3] is not None:
+            by_page[s[3]].append((i, s))
+
+    # First section on each page (earliest index on that page) = page heading
+    page_heading: dict[int, str] = {}
+    for p in sorted(by_page.keys()):
+        # First section on this page = min index
+        items = by_page[p]
+        items.sort(key=lambda x: x[0])
+        first_sec = items[0][1]
+        name = (first_sec[0] or "").strip()[:80]
+        page_heading[p] = name or f"Page {p}"
+
+    # Runs: consecutive pages with same heading
+    pages_sorted = sorted(page_heading.keys())
+    runs: list[tuple[int, int, str]] = []  # (start_page, end_page, heading)
+    if not pages_sorted:
+        runs = []
+    else:
+        start = pages_sorted[0]
+        cur_heading = page_heading[start]
+        for p in pages_sorted[1:]:
+            if page_heading[p] == cur_heading:
+                continue
+            runs.append((start, p - 1, cur_heading))
+            start = p
+            cur_heading = page_heading[p]
+        runs.append((start, pages_sorted[-1], cur_heading))
+
+    # For each page, sheet = heading of the run that contains it
+    page_to_sheet: dict[int, str] = {}
+    for start, end, heading in runs:
+        for p in range(start, end + 1):
+            page_to_sheet[p] = heading
+
+    by_sheet = defaultdict(list)
+    ordered = []  # sheet order = run order
+    seen_sheets = set()
+    for _start, _end, heading in runs:
+        if heading not in seen_sheets:
+            ordered.append(heading)
+            seen_sheets.add(heading)
+
+    for s in sections:
+        if len(s) >= 4 and s[3] is not None:
+            sheet = page_to_sheet.get(s[3], "Other")
+            by_sheet[sheet].append(s)
+        else:
+            by_sheet["Other"].append(s)
+
+    if by_sheet.get("Other"):
+        ordered.append("Other")
+    return (ordered, dict(by_sheet))
+
+
+def _toc_sheet_for_page(page_num: int, toc: list[tuple[str, int]]) -> str:
+    """Return the TOC heading that covers this page (last TOC entry with start_page <= page_num)."""
+    best = None
+    for heading, start in toc:
+        if start <= page_num:
+            best = heading
+    return best if best else "Other"
+
+
+def _section_to_block_rows(section: tuple) -> list[list]:
+    """Convert (sec_name, heading_rows, data_rows[, page]) to list of rows for writing."""
+    sec_name = section[0]
+    heading_rows = section[1]
+    data_rows = section[2]
+    rows = []
+    for h in heading_rows or []:
+        rows.append(h if isinstance(h, (list, tuple)) else [h])
+    rows.extend(r if isinstance(r, (list, tuple)) else [r] for r in (data_rows or []))
+    return rows
+
+
+def write_workbook_by_toc(
+    sections: list[tuple],
+    toc: list[tuple[str, int]],
+    output_path: Path,
+    validation_errors: list[str] | None = None,
+) -> str:
+    """
+    Build Excel with one sheet per TOC heading. Sections must be 4-tuples (name, heading_rows, data_rows, page_num).
+    Each sheet gets all sections whose page falls in that TOC range; sections without page go to "Other".
+    """
+    from collections import defaultdict
+
+    by_sheet = defaultdict(list)
+    for s in sections:
+        if len(s) >= 4 and s[3] is not None:
+            sheet_name = _toc_sheet_for_page(s[3], toc)
+            by_sheet[sheet_name].append(s)
+        else:
+            by_sheet["Other"].append(s)
+
+    toc_headings = [h for h, _ in toc]
+    ordered = [h for h in toc_headings if by_sheet.get(h)]
+    if by_sheet.get("Other"):
+        ordered.append("Other")
+
+    return _write_workbook_by_sheets(dict(by_sheet), ordered, output_path, validation_errors)
+
+
+def _write_workbook_by_sheets(
+    by_sheet: dict[str, list],
+    ordered_sheet_names: list[str],
+    output_path: Path,
+    validation_errors: list[str] | None = None,
+) -> str:
+    """
+    Build Excel with one sheet per key in ordered_sheet_names; each sheet gets sections from by_sheet[name].
+    Shared by TOC-driven and heading-inferred (no-TOC) paths.
+    """
+    wb_out = Workbook()
+    wb_out.remove(wb_out.active)
+
+    for target_name in ordered_sheet_names:
+        blocks = by_sheet.get(target_name)
+        if not blocks:
+            continue
+        safe_name = _safe_sheet_name(target_name)[:31]
+        ws = wb_out.create_sheet(title=safe_name)
+        row_num = 1
+        for i, section in enumerate(blocks):
+            sec_name = section[0]
+            block_rows = _section_to_block_rows(section)
+            if i > 0:
+                cell = ws.cell(row=row_num, column=1, value=f"— {sec_name} —")
+                cell.font = Font(italic=True)
+                _fill_row(ws, row_num, 20, FILL_SECTION_HEADER)
+                row_num += 1
+                row_num += 1
+            for row_idx, r in enumerate(block_rows):
+                r_list = r if r else []
+                r_list = _merge_fragmented_row(r_list)
+                if _is_prose_row(r_list):
+                    continue
+                num_cols = max(len(r_list), 1)
+                for col_idx, val in enumerate(r_list, start=1):
+                    if val is not None and not isinstance(val, (int, float, Decimal)):
+                        val = _normalize_cell_value(val)
+                    cell = ws.cell(row=row_num, column=col_idx, value=val)
+                    if _is_formula_or_check(val):
+                        cell.fill = FILL_FORMULA
+                    elif _is_account_id(val):
+                        cell.fill = FILL_SECTION_HEADER
+                if row_idx == 0:
+                    _fill_row(ws, row_num, num_cols, FILL_SECTION_HEADER)
+                elif row_idx == 1 and _looks_like_header_row(r_list):
+                    _fill_row(ws, row_num, num_cols, FILL_TABLE_HEADER)
+                elif _is_totals_row(r_list):
+                    _fill_row(ws, row_num, num_cols, FILL_TOTALS)
+                row_num += 1
+            row_num += 1
+
+    if validation_errors:
+        ws_val = wb_out.create_sheet(title="Validation Results")
+        ws_val.cell(row=1, column=1, value="Requires Review")
+        ws_val.cell(row=1, column=2, value="Yes")
+        for i, msg in enumerate(validation_errors, start=2):
+            ws_val.cell(row=i, column=1, value=msg)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    wb_out.save(output_path)
+    return str(output_path)
+
+
+def transform_extracted_to_qb(
+    extracted_xlsx_path: str,
+    output_path: str,
+    validation_errors: list[str] | None = None,
+) -> str:
     """
     Read an extracted workbook (from pdf_tables_to_excel) and write a QB-format workbook.
 
     - Groups sheets by target name (e.g. all Asset Allocation → one sheet).
     - Writes sections one after another with a blank row and section title between.
+    - If validation_errors is non-empty, adds a "Validation Results" sheet and marks Requires Review.
     - Returns the path to the written file.
     """
     from openpyxl import load_workbook
@@ -547,34 +728,34 @@ def transform_extracted_to_qb(extracted_xlsx_path: str, output_path: str) -> str
         by_target["Account Summary"] = [merged_account_summary]
         by_target["Period Summary"] = []  # Skip noisy Period Summary sheet; data is in Account Summary
 
-    # Build ordered list of (target_name, blocks)
-    seen = set()
+    # Build ordered list of (target_name, blocks) without any hard-coded ordering.
+    # Keep "PLSummary" and "Account Summary" near the top when present, then the rest alphabetically.
     ordered_targets = []
-    for name in QB_SHEET_ORDER:
-        if name in by_target and name not in seen:
-            ordered_targets.append(name)
-            seen.add(name)
-    for name in sorted(by_target.keys()):
-        if name not in seen:
-            ordered_targets.append(name)
-            seen.add(name)
+    for preferred in ("PLSummary", "Account Summary"):
+        if preferred in by_target:
+            ordered_targets.append(preferred)
+    for name in sorted(k for k in by_target.keys() if k not in set(ordered_targets)):
+        ordered_targets.append(name)
 
     wb_out = Workbook()
     wb_out.remove(wb_out.active)
 
-    # Build sample-style PLSummary J.P. Morgan Chase as the main sheet (first)
-    try:
-        from plsummary_builder import build_plsummary_jpm_sheet
-        build_plsummary_jpm_sheet(wb_out, by_target)
-    except Exception:
-        pass  # if builder fails, continue with section-based sheets
+    # Build PLSummary only when we have QB-style data to fill it (otherwise we get an empty template first)
+    plsummary_sources = ("Account Summary", "Asset Allocation", "Portfolio Activity", "Tax Summary")
+    has_plsummary_data = any(by_target.get(k) for k in plsummary_sources)
+    if has_plsummary_data:
+        try:
+            from plsummary_builder import build_plsummary_jpm_sheet
+            build_plsummary_jpm_sheet(wb_out, by_target)
+        except Exception:
+            pass  # if builder fails, continue with section-based sheets
 
     # Skip Period Summary (noisy repeated "Period Summary 2, 3, 4" and prose); keep the rest
     ordered_targets = [t for t in ordered_targets if t != "Period Summary"]
 
     for target_name in ordered_targets:
         blocks = by_target[target_name]
-        safe_name = _safe_sheet_name(target_name)
+        safe_name = _safe_sheet_name(target_name)[:31]  # Excel sheet name limit
         ws = wb_out.create_sheet(title=safe_name)
         row_num = 1
         # Per-account sheets: split each block by section (Account Summary, Asset Allocation, etc.) and drop CONTINUED
@@ -602,7 +783,7 @@ def transform_extracted_to_qb(extracted_xlsx_path: str, output_path: str) -> str
                         continue
                     num_cols = max(len(r_list), 1)
                     for col_idx, val in enumerate(r_list, start=1):
-                        if val is not None and not isinstance(val, (int, float)):
+                        if val is not None and not isinstance(val, (int, float, Decimal)):
                             val = _normalize_cell_value(val)
                         cell = ws.cell(row=row_num, column=col_idx, value=val)
                         if _is_formula_or_check(val):
@@ -618,16 +799,30 @@ def transform_extracted_to_qb(extracted_xlsx_path: str, output_path: str) -> str
                     row_num += 1
                 row_num += 1  # blank after each block
 
+    # Validation Results sheet when there are validation errors
+    if validation_errors:
+        ws_val = wb_out.create_sheet(title="Validation Results")
+        ws_val.cell(row=1, column=1, value="Requires Review")
+        ws_val.cell(row=1, column=2, value="Yes")
+        ws_val.cell(row=2, column=1, value="Message")
+        for i, msg in enumerate(validation_errors, start=3):
+            ws_val.cell(row=i, column=1, value=msg)
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
     wb_out.save(out_path)
     return str(out_path)
 
 
-def pdf_to_qb_excel(pdf_path: str, output_path: str, overwrite: bool = True) -> str:
+def pdf_to_qb_excel(
+    pdf_path: str,
+    output_path: str,
+    overwrite: bool = True,
+    json_path_out: str | Path | None = None,
+) -> str:
     """
     Full pipeline: PDF → JSON (canonical) → Excel. JSON is the intermediate; Excel is built from it.
 
-    1. Extract PDF to sections; write JSON.
+    1. Extract PDF to sections; write JSON (to json_path_out if provided, else temp).
     2. Load sections from JSON; write raw Excel from it.
     3. Transform raw Excel to structured workbook (merge/rename sheets, colors).
     4. Save to output_path. Returns output_path.
@@ -635,7 +830,10 @@ def pdf_to_qb_excel(pdf_path: str, output_path: str, overwrite: bool = True) -> 
     import tempfile
     from tables_to_excel import (
         extract_sections_from_pdf,
+        extract_toc_from_pdf,
+        filter_sections_to_tables_only,
         load_sections_from_json,
+        validate_sections,
         _write_json_from_sections,
         _write_sections_to_workbook,
     )
@@ -644,22 +842,41 @@ def pdf_to_qb_excel(pdf_path: str, output_path: str, overwrite: bool = True) -> 
     if out_path.exists() and not overwrite:
         raise FileExistsError(f"Output exists: {out_path}")
 
-    # 1. PDF → JSON (canonical intermediate)
+    # 1. PDF → JSON (canonical intermediate); keep only table-like sections (no long prose)
     sections = extract_sections_from_pdf(pdf_path)
-    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
-        json_path = f.name
+    sections = filter_sections_to_tables_only(sections)
+    json_path = Path(json_path_out) if json_path_out else Path(tempfile.NamedTemporaryFile(suffix=".json", delete=False).name)
     try:
-        _write_json_from_sections(sections, Path(json_path), overwrite=True)
-        # 2. JSON → raw Excel (Excel is produced from JSON)
-        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
-            temp_extracted = f.name
-        try:
-            sections_from_json = load_sections_from_json(json_path)
-            _write_sections_to_workbook(sections_from_json, Path(temp_extracted))
-            # 3. Transform to structured workbook
-            transform_extracted_to_qb(temp_extracted, output_path)
-            return str(out_path)
-        finally:
-            Path(temp_extracted).unlink(missing_ok=True)
+        _write_json_from_sections(sections, json_path, overwrite=True)
+        sections_from_json = load_sections_from_json(str(json_path))
+        validation_errors, requires_review = validate_sections(sections_from_json)
+        for err in validation_errors or []:
+            log.warning("validation: %s", err)
+        if requires_review:
+            log.warning("Output marked as Requires Review (see Validation Results sheet)")
+
+        # 2. Build Excel: TOC from page 1 → one sheet per TOC heading; else infer from section names → same structure
+        toc = extract_toc_from_pdf(pdf_path)
+        has_page = any(len(s) >= 4 and s[3] is not None for s in sections_from_json)
+        if toc and has_page:
+            log.info("Using table-of-contents from page 1: %d heading(s)", len(toc))
+            write_workbook_by_toc(sections_from_json, toc, out_path, validation_errors=validation_errors or None)
+        else:
+            # No TOC: infer sheet boundaries from document — first section on each page = page heading;
+            # consecutive pages with same heading = one sheet (e.g. Holdings pages 6–16 → one sheet)
+            ordered_names, by_sheet = _infer_sheets_from_first_section_per_page(sections_from_json)
+            if ordered_names:
+                log.info("No TOC; inferred %d sheet(s) from first section per page", len(ordered_names))
+                _write_workbook_by_sheets(by_sheet, ordered_names, out_path, validation_errors=validation_errors or None)
+            else:
+                with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+                    temp_extracted = f.name
+                try:
+                    _write_sections_to_workbook(sections_from_json, Path(temp_extracted))
+                    transform_extracted_to_qb(temp_extracted, output_path, validation_errors=validation_errors or None)
+                finally:
+                    Path(temp_extracted).unlink(missing_ok=True)
+        return str(out_path)
     finally:
-        Path(json_path).unlink(missing_ok=True)
+        if not json_path_out:
+            json_path.unlink(missing_ok=True)
