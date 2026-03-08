@@ -585,16 +585,23 @@ def _toc_sheet_for_page(page_num: int, toc: list[tuple[str, int]]) -> str:
     return best if best else "Other"
 
 
-def _section_to_block_rows(section: tuple) -> list[list]:
-    """Convert (sec_name, heading_rows, data_rows[, page]) to list of rows for writing."""
+def _section_to_block_rows(section: tuple) -> tuple[list[list], set[int]]:
+    """Convert (sec_name, heading_rows, data_rows[, page[, bold_data_row_indices]]) to (rows, bold_row_indices) for writing. Drops PDF page-number footer rows."""
+    from tables_to_excel import _drop_page_number_rows
+
     sec_name = section[0]
     heading_rows = section[1]
     data_rows = section[2]
+    bold_data_indices = section[4] if len(section) >= 5 else set()
     rows = []
     for h in heading_rows or []:
         rows.append(h if isinstance(h, (list, tuple)) else [h])
+    num_heading = len(rows)
     rows.extend(r if isinstance(r, (list, tuple)) else [r] for r in (data_rows or []))
-    return rows
+    rows = _drop_page_number_rows(rows)
+    # Indices into block rows that should be bold (data rows that were bold in PDF)
+    bold_row_indices = {i for i in (num_heading + j for j in bold_data_indices) if i < len(rows)}
+    return (rows, bold_row_indices)
 
 
 def write_workbook_by_toc(
@@ -647,7 +654,7 @@ def _write_workbook_by_sheets(
         row_num = 1
         for i, section in enumerate(blocks):
             sec_name = section[0]
-            block_rows = _section_to_block_rows(section)
+            block_rows, bold_row_indices = _section_to_block_rows(section)
             if i > 0:
                 cell = ws.cell(row=row_num, column=1, value=f"— {sec_name} —")
                 cell.font = Font(italic=True)
@@ -664,6 +671,8 @@ def _write_workbook_by_sheets(
                     if val is not None and not isinstance(val, (int, float, Decimal)):
                         val = _normalize_cell_value(val)
                     cell = ws.cell(row=row_num, column=col_idx, value=val)
+                    if row_idx in bold_row_indices:
+                        cell.font = Font(bold=True)
                     if _is_formula_or_check(val):
                         cell.fill = FILL_FORMULA
                     elif _is_account_id(val):

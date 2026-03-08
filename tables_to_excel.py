@@ -283,6 +283,29 @@ def _drop_empty_rows(rows: list[list]) -> list[list]:
     ]
 
 
+# Match "Page 3 of 54" or "Page  3 of  54" (PDF footer)
+_PAGE_OF_PAGE_RE = re.compile(r"^\s*Page\s*\d+\s*of\s*\d+\s*$", re.I)
+
+
+def _is_page_number_row(row: list) -> bool:
+    """True if this row is a PDF page-number footer (e.g. single cell 'Page 3 of 54' or row containing it)."""
+    if not row:
+        return False
+    cells = row if isinstance(row, (list, tuple)) else [row]
+    for c in cells:
+        if c is None:
+            continue
+        s = str(c).strip()
+        if _PAGE_OF_PAGE_RE.match(s):
+            return True
+    return False
+
+
+def _drop_page_number_rows(rows: list[list]) -> list[list]:
+    """Remove rows that are PDF page-number footers so they don't appear in Excel/JSON."""
+    return [r for r in rows if not _is_page_number_row(r)]
+
+
 def _clean_table_rows(rows: list) -> list[list]:
     """Apply merge of fragmented cells and drop empty rows. Use for all table row sources."""
     merged = [_merge_fragmented_row(list(r) if isinstance(r, (list, tuple)) else [r]) for r in rows]
@@ -388,10 +411,10 @@ def _page_sections_with_headings(page, page_num: int):
                 if not sub_rows:
                     continue
                 section_idx += 1
-                # Use sub-table title (e.g. Asset Allocation) as section name; keep page heading as first line if present
+                # Use sub-table title (e.g. Asset Allocation) as section name; keep all headings (e.g. NON-REPORTABLE ITEMS) so parent headings appear in Excel
                 head = [sub_title] if sub_title != "Section" else (heading_rows or [f"Page{page_num}_T{section_idx}"])
                 if heading_rows and sub_title != "Section":
-                    head = heading_rows[:1] + [sub_title]  # period/context then table title
+                    head = heading_rows + [sub_title]  # all lines above table (period, parent section) then table title
                 name = (sub_title[:28] + f"_{section_idx}") if sub_title != "Section" else ((heading_rows[0][:28] + f"_{section_idx}") if heading_rows else f"Page{page_num}_T{section_idx}")
                 yield (_safe_sheet_name(name, section_idx), head, sub_rows)
             prev_table_bottom = table_bottom
@@ -547,12 +570,16 @@ def _normalize_table_rows(data_rows: list) -> list[list]:
     return out
 
 
-def _write_section_to_sheet(ws, sec_name: str, heading_rows: list, data_rows: list, start_row: int = 1) -> int:
+def _write_section_to_sheet(
+    ws, sec_name: str, heading_rows: list, data_rows: list, start_row: int = 1, bold_data_row_indices: set | None = None
+) -> int:
     """
     Write one section to a worksheet like the PDF: section title, optional summary table,
     then the main data table with header row and columns. Uses bold for title and table header.
+    If bold_data_row_indices is set (0-based indices into data_rows), those data rows are written bold to match PDF.
     Returns the next row number after this section (so callers can append more sections).
     """
+    bold_data_row_indices = bold_data_row_indices or set()
     title, summary_rows, table_header_lines = _parse_summary_lines(heading_rows)
     row_num = start_row
 
@@ -568,12 +595,12 @@ def _write_section_to_sheet(ws, sec_name: str, heading_rows: list, data_rows: li
             row_num += 1
         row_num += 1  # blank row after summary
 
-    # Prepend any header lines (that were above the table in the PDF) to the data table
+    # Prepend any header lines (that were above the table in the PDF) to the data table; drop PDF page-number footer rows
     combined_data = []
     for line in table_header_lines:
         parts = re.split(r"  +", line)
         combined_data.append(parts if len(parts) > 1 else [line])
-    combined_data.extend(data_rows)
+    combined_data.extend(_drop_page_number_rows(data_rows))
     data_rows = combined_data
 
     # Main data table: header row + data rows
@@ -590,10 +617,12 @@ def _write_section_to_sheet(ws, sec_name: str, heading_rows: list, data_rows: li
         cell.font = Font(bold=True)
     row_num += 1
 
-    # Data rows
-    for r in table_rows[1:]:
+    # Data rows (bold where PDF had bold, e.g. TOTAL lines)
+    for data_idx, r in enumerate(table_rows[1:]):
         for col_idx, val in enumerate(r, start=1):
-            ws.cell(row=row_num, column=col_idx, value=_cell_value(val) if not isinstance(val, (int, float, Decimal)) else val)
+            cell = ws.cell(row=row_num, column=col_idx, value=_cell_value(val) if not isinstance(val, (int, float, Decimal)) else val)
+            if data_idx in bold_data_row_indices:
+                cell.font = Font(bold=True)
         row_num += 1
 
     # Auto-fit column widths for this section's columns (only if we're the first section or single-sheet)
@@ -738,10 +767,17 @@ def _extract_sections_from_pdf_pymupdf(pdf_path: Path) -> list[tuple[str, list, 
     ROW_TOLERANCE = 5  # pts: spans within this y-distance are same row
     COL_GAP = 15  # pts: gap in x to treat as new column
 
-    def page_to_rows(page) -> list[list[str]]:
-        """Build list of rows; each row is list of cell strings (using bbox for columns)."""
+    def page_to_rows(page) -> tuple[list[list[str]], list[bool]]:
+        """Build list of rows; each row is list of cell strings. Also return row_bold[i]=True if row i has bold text in PDF."""
         blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE).get("blocks") or []
-        # Collect (y0, x0, text) for each span
+        # PDF font flags: bit 1 (2)=italic, bit 4 (16)=bold; also check font name
+        def _span_bold(span) -> bool:
+            flags = span.get("flags", 0) or 0
+            if (flags & 16) != 0:
+                return True
+            font = (span.get("font") or "").lower()
+            return "bold" in font
+        # Collect (y0, x0, text, is_bold) for each span
         items = []
         for block in blocks:
             for line in block.get("lines") or []:
@@ -751,29 +787,34 @@ def _extract_sections_from_pdf_pymupdf(pdf_path: Path) -> list[tuple[str, list, 
                         continue
                     bbox = span.get("bbox", (0, 0, 0, 0))
                     x0, y0 = bbox[0], bbox[1]
-                    items.append((y0, x0, text))
+                    items.append((y0, x0, text, _span_bold(span)))
         if not items:
-            return []
-        # Group by row (similar y)
+            return [], []
+        # Group by row (similar y); track if any span in row was bold
         items.sort(key=lambda t: (round(t[0] / ROW_TOLERANCE), t[1]))
         rows = []
+        row_bold = []
         current_y = None
-        current_cells = []
-        for y0, x0, text in items:
+        current_cells = []  # list of (x0, text, is_bold)
+        for y0, x0, text, is_bold in items:
             y_key = round(y0 / ROW_TOLERANCE)
             if current_y is not None and y_key != current_y:
                 if current_cells:
-                    rows.append([c for _, c in sorted(current_cells, key=lambda t: t[0])])
+                    row_vals = [c[1] for c in sorted(current_cells, key=lambda t: t[0])]
+                    rows.append(row_vals)
+                    row_bold.append(any(c[2] for c in current_cells))
                 current_cells = []
             current_y = y_key
-            # Merge spans that are close in x (same cell)
             if current_cells and abs(x0 - current_cells[-1][0]) < COL_GAP:
-                current_cells[-1] = (current_cells[-1][0], (current_cells[-1][1] + " " + text).strip())
+                prev = current_cells[-1]
+                current_cells[-1] = (prev[0], (prev[1] + " " + text).strip(), prev[2] or is_bold)
             else:
-                current_cells.append((x0, text))
+                current_cells.append((x0, text, is_bold))
         if current_cells:
-            rows.append([c for _, c in sorted(current_cells, key=lambda t: t[0])])
-        return rows
+            row_vals = [c[1] for c in sorted(current_cells, key=lambda t: t[0])]
+            rows.append(row_vals)
+            row_bold.append(any(c[2] for c in current_cells))
+        return rows, row_bold
 
     def _is_table_start_row(row) -> bool:
         """True if row looks like a table section title only (no numeric in same row). Used for boundaries."""
@@ -797,7 +838,7 @@ def _extract_sections_from_pdf_pymupdf(pdf_path: Path) -> list[tuple[str, list, 
     try:
         for page_num in range(len(doc)):
             page = doc[page_num]
-            rows = page_to_rows(page)
+            rows, row_bold = page_to_rows(page)
             if not rows:
                 continue
             # Find table boundaries: rows that are section titles only (no data in same row)
@@ -806,13 +847,28 @@ def _extract_sections_from_pdf_pymupdf(pdf_path: Path) -> list[tuple[str, list, 
                 sec_name = (rows[i][0] if rows[i] else "").strip()[:50]
                 end_i = starts[k + 1] if k + 1 < len(starts) else len(rows)
                 data_rows = rows[i + 1 : end_i]
+                bold_slice = row_bold[i + 1 : end_i]
                 # Prepend any rows before the first table on this page (e.g. "TOTAL PORTFOLIO: ..." with value)
                 if k == 0 and i > 0:
                     data_rows = rows[0:i] + data_rows
+                    bold_slice = row_bold[0:i] + bold_slice
                 cleaned = _clean_table_rows(data_rows)
                 data_rows = [_normalize_row(r) for r in cleaned]
+                # Bold indices into data_rows (by position; cleaning may drop rows so we cap by len(data_rows))
+                bold_data_row_indices = {j for j in range(min(len(bold_slice), len(data_rows))) if bold_slice[j]}
                 if data_rows:  # only emit if there is content
-                    sections.append((sec_name, [sec_name], data_rows, page_num + 1))
+                    # If previous table-start had no data (e.g. "NON-REPORTABLE ITEMS"), add it as parent heading
+                    heading_rows = [sec_name]
+                    if k > 0:
+                        prev_i = starts[k - 1]
+                        prev_sec = (rows[prev_i][0] if rows[prev_i] else "").strip()[:50]
+                        prev_data = _clean_table_rows(rows[prev_i + 1 : i])
+                        if not prev_data:
+                            heading_rows = [prev_sec, sec_name]
+                    if bold_data_row_indices:
+                        sections.append((sec_name, heading_rows, data_rows, page_num + 1, bold_data_row_indices))
+                    else:
+                        sections.append((sec_name, heading_rows, data_rows, page_num + 1))
             if not starts and rows:
                 # No table-start row on page: one block with all rows (e.g. continuation)
                 raw_title = (rows[0][0] if rows and rows[0] else "")
@@ -820,8 +876,13 @@ def _extract_sections_from_pdf_pymupdf(pdf_path: Path) -> list[tuple[str, list, 
                 if len(title) < 5:
                     title = f"Page{page_num + 1}"
                 data_rows = [_normalize_row(r) for r in _clean_table_rows(rows[1:])]
+                bold_slice = row_bold[1:] if len(row_bold) > 1 else []
+                bold_data_row_indices = {j for j, b in enumerate(bold_slice[: len(data_rows)]) if b} if bold_slice else set()
                 if data_rows:
-                    sections.append((f"Page{page_num + 1}", [title], data_rows, page_num + 1))
+                    if bold_data_row_indices:
+                        sections.append((f"Page{page_num + 1}", [title], data_rows, page_num + 1, bold_data_row_indices))
+                    else:
+                        sections.append((f"Page{page_num + 1}", [title], data_rows, page_num + 1))
     finally:
         doc.close()
     return sections
@@ -1077,6 +1138,7 @@ def _sections_to_json_serializable(sections: list[tuple]) -> list[dict]:
     for s in sections:
         sec_name, heading_rows, data_rows = s[0], s[1], s[2]
         page_num = s[3] if len(s) >= 4 else None
+        data_rows = _drop_page_number_rows(data_rows or [])
         # Headings: list of strings (first line can be section title)
         headings = []
         for h in (heading_rows or []):
@@ -1326,7 +1388,8 @@ def _write_sections_to_workbook(
         next_row = 1
         for s in sections:
             sec_name, heading_rows, data_rows = s[0], s[1], s[2]
-            next_row = _write_section_to_sheet(ws, sec_name, heading_rows, data_rows, start_row=next_row)
+            bold_indices = s[4] if len(s) >= 5 else None
+            next_row = _write_section_to_sheet(ws, sec_name, heading_rows, data_rows, start_row=next_row, bold_data_row_indices=bold_indices)
             next_row += 2
         sheet_count = 1
     else:
@@ -1350,7 +1413,8 @@ def _write_sections_to_workbook(
             else:
                 name = _safe_sheet_name(sec_name, idx + 1)
             ws = wb.create_sheet(title=name[:31])
-            _write_section_to_sheet(ws, sec_name, heading_rows, data_rows)
+            bold_indices = s[4] if len(s) >= 5 else None
+            _write_section_to_sheet(ws, sec_name, heading_rows, data_rows, bold_data_row_indices=bold_indices)
             log.debug("excel sheet=%s section=%s rows=%d", name, (sec_name or "")[:40], len(data_rows or []))
         sheet_count = len(sections)
     wb.save(out_path)
