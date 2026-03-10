@@ -482,7 +482,22 @@ def _is_prose_row(row: list) -> bool:
     # Keep rows that clearly have table data (so we don't drop "ABC TRUST, E79271004, $15,088,442..." with bleed)
     if _row_has_table_data(row):
         return False
+    # Keep rows that look like table column headers (e.g. "Beginning Market Value", "Net Deposits (Withdrawals)", "Investment Results")
     text = " ".join(str(c).strip() for c in cells).lower()
+    if any(
+        phrase in text
+        for phrase in (
+            "beginning market value",
+            "net deposits",
+            "investment results",
+            "ending market value",
+            "current month",
+            "year to date",
+            "inception to date",
+            "quarter to date",
+        )
+    ):
+        return False
     # Explicit disclaimer / blank page
     if "this page intentionally left blank" in text:
         return True
@@ -664,6 +679,12 @@ def _write_workbook_by_sheets(
             for row_idx, r in enumerate(block_rows):
                 r_list = r if r else []
                 r_list = _merge_fragmented_row(r_list)
+                # Skip duplicate section title row (e.g. "INVESTMENT RESULTS" again as first row)
+                if row_idx == 0 and r_list and sec_name:
+                    first_cell = str(r_list[0] or "").strip()
+                    rest_empty = all(not str(c or "").strip() for c in r_list[1:])
+                    if first_cell and rest_empty and first_cell.upper() == (sec_name or "").upper():
+                        continue
                 if _is_prose_row(r_list):
                     continue
                 num_cols = max(len(r_list), 1)
@@ -835,6 +856,7 @@ def pdf_to_qb_excel(
     2. Load sections from JSON; write raw Excel from it.
     3. Transform raw Excel to structured workbook (merge/rename sheets, colors).
     4. Save to output_path. Returns output_path.
+
     """
     import tempfile
     from tables_to_excel import (
@@ -842,6 +864,7 @@ def pdf_to_qb_excel(
         extract_toc_from_pdf,
         filter_sections_to_tables_only,
         load_sections_from_json,
+        merge_section_header_rows,
         validate_sections,
         _write_json_from_sections,
         _write_sections_to_workbook,
@@ -853,6 +876,7 @@ def pdf_to_qb_excel(
 
     # 1. PDF → JSON (canonical intermediate); keep only table-like sections (no long prose)
     sections = extract_sections_from_pdf(pdf_path)
+    sections = [merge_section_header_rows(s) for s in sections]
     sections = filter_sections_to_tables_only(sections)
     json_path = Path(json_path_out) if json_path_out else Path(tempfile.NamedTemporaryFile(suffix=".json", delete=False).name)
     try:

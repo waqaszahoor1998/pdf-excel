@@ -539,6 +539,98 @@ def _split_table_cell(cell: str) -> list:
     return [_cell_value(cell)]
 
 
+def _row_has_data_like_cells(row: list) -> bool:
+    """True if row looks like a data row: contains CURRENT MONTH/YEAR or has 2+ numeric cells."""
+    if not row:
+        return False
+    cells = row if isinstance(row, (list, tuple)) else [row]
+    text = " ".join(str(c) for c in cells).upper()
+    if "CURRENT MONTH" in text or "CURRENT YEAR" in text or "YEAR TO DATE" in text or "QUARTER TO DATE" in text:
+        return True
+    numeric_count = sum(1 for c in cells if _cell_looks_numeric(c))
+    return numeric_count >= 2
+
+
+def merge_section_header_rows(section: tuple) -> tuple:
+    """
+    If section has data_rows that start with multi-line header rows (then a data row like CURRENT MONTH),
+    merge those header rows into one. Returns section with same structure and merged data_rows.
+    """
+    if not section or len(section) < 3:
+        return section
+    sec_name, heading_rows, data_rows = section[0], section[1], section[2]
+    rest = section[3:] if len(section) > 3 else ()
+    if not data_rows:
+        return section
+    merged_data = _merge_multi_line_header_rows(data_rows)
+    if len(rest) > 0:
+        return (sec_name, heading_rows, merged_data, *rest)
+    return (sec_name, heading_rows, merged_data)
+
+
+def _is_inception_or_performance_title_row(row: list) -> bool:
+    """True if row looks like a standalone title (e.g. 'Inception Date for Performance May 9 25') - keep above merged header."""
+    if not row:
+        return False
+    cells = row if isinstance(row, (list, tuple)) else [row]
+    first = str(cells[0] or "").strip()
+    if not first or len(first) < 15:
+        return False
+    lower = first.lower()
+    return "inception" in lower and ("date" in lower or "performance" in lower)
+
+
+def _merge_multi_line_header_rows(rows: list[list]) -> list[list]:
+    """
+    Merge consecutive rows at the top that look like multi-line column headers into one header row.
+    Uses the first row that looks like data (CURRENT MONTH/YEAR or 2+ numeric cells) to get column count N.
+    Header rows are right-aligned to N columns (so last column aligns with data), then merged column-wise.
+    First column (row label column) is set to '-' when empty.
+    If the very first row looks like "Inception Date for Performance..." (PERFORMANCE table), keep it separate and merge only the rows below it.
+    """
+    if not rows or len(rows) < 2:
+        return rows
+    rows_as_lists = []
+    for r in rows:
+        rows_as_lists.append(list(r) if isinstance(r, (list, tuple)) else [r])
+    data_idx = None
+    for i, r in enumerate(rows_as_lists):
+        if _row_has_data_like_cells(r):
+            data_idx = i
+            break
+    if data_idx is None or data_idx <= 1:
+        return rows
+    N = len(rows_as_lists[data_idx])
+    if N <= 0:
+        return rows
+    # PERFORMANCE-style: keep "Inception Date for Performance May 9 25" as its own row, merge only rows below it
+    prefix_row = None
+    if data_idx >= 2 and _is_inception_or_performance_title_row(rows_as_lists[0]):
+        prefix_row = rows_as_lists[0]
+        header_rows = rows_as_lists[1:data_idx]
+    else:
+        header_rows = rows_as_lists[:data_idx]
+    # Right-align each header row to N columns: row with K cells → columns [N-K .. N-1]
+    grid = []
+    for r in header_rows:
+        K = len(r)
+        padded = [""] * N
+        for j, val in enumerate(r):
+            cell = str(val).strip() if val is not None else ""
+            if N - K + j >= 0 and N - K + j < N:
+                padded[N - K + j] = cell
+        grid.append(padded)
+    merged = []
+    for j in range(N):
+        parts = [grid[i][j].strip() for i in range(len(grid)) if grid[i][j] and str(grid[i][j]).strip()]
+        merged.append(" ".join(parts).strip() if parts else "")
+    if not merged[0].strip():
+        merged[0] = "-"
+    if prefix_row is not None:
+        return [prefix_row, merged] + rows_as_lists[data_idx:]
+    return [merged] + rows_as_lists[data_idx:]
+
+
 def _normalize_table_rows(data_rows: list) -> list[list]:
     """
     Ensure all rows have the same length (pad with empty strings).
@@ -603,12 +695,28 @@ def _write_section_to_sheet(
     combined_data.extend(_drop_page_number_rows(data_rows))
     data_rows = combined_data
 
+    # Merge multi-line column headers (e.g. "Beginning" + "Market Value" → one header "Beginning Market Value"; first column "-" when empty)
+    data_rows = _merge_multi_line_header_rows(data_rows)
+
     # Main data table: header row + data rows
     table_rows = _normalize_table_rows(data_rows)
     if not table_rows:
         if row_num == start_row + 1 and not summary_rows:
             ws.cell(row=row_num, column=1, value="(No table data)")
             row_num += 1
+        return row_num
+
+    # Avoid duplicate section title: if first row is only the section title, drop it; if first cell of header row equals section title, use "-" for that cell
+    if title and len(table_rows) >= 1:
+        first_row = table_rows[0]
+        first_cell = str(first_row[0] or "").strip() if first_row else ""
+        rest_empty = all(not str(c or "").strip() for c in (first_row[1:] if len(first_row) > 1 else []))
+        if first_cell and rest_empty and first_cell.upper() == title.upper():
+            table_rows = table_rows[1:]
+        elif first_cell and first_cell.upper() == title.upper():
+            # First cell of header row repeats section title (e.g. INVESTMENT RESULTS); use "-" for row-label column
+            table_rows = [["-"] + list(first_row[1:])] + list(table_rows[1:])
+    if not table_rows:
         return row_num
 
     # Table header (first row, bold)
