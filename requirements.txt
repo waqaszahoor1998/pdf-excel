@@ -1,0 +1,16 @@
+anthropic>=0.39.0
+flask>=3.0.0
+google-genai>=1.0.0
+openai>=1.0.0
+jsonschema>=4.20.0
+openpyxl>=3.1.0
+python-dotenv>=1.0.0
+pdfplumber>=0.11.0
+# PyMuPDF (fitz): fallback when pdfplumber gets no text (e.g. some broker statement PDFs expose text to fitz only)
+pymupdf>=1.24.0
+# Camelot: table extraction (lattice/stream). May need ghostscript + tk on system.
+camelot-py[base]>=0.11.0
+# Tabula-py: table extraction via tabula-java. Requires Java on system.
+tabula-py>=2.10.0
+pytest>=7.0.0
+reportlab>=4.0.0

@@ -1,0 +1,27 @@
+{
+  "_comment": "Add phrases, fragment merges, or title→sheet name mappings for your PDFs without code changes.",
+  "title_to_sheet": [
+    ["statement of holdings", "Holdings"],
+    ["holdings summary", "Holdings Summary"],
+    ["gs preferred", "GS Preferred"],
+    ["hybrid securities", "Hybrid Securities"]
+  ],
+  "footer_phrases": [
+    "available online",
+    "form 1099",
+    "if you have not",
+    "\"form\") will",
+    "this page intentionally left blank",
+    "please see disclosure",
+    "not fdic insured",
+    "not insured by any government",
+    "not a deposit",
+    "subject to investment risks",
+    "possible loss of the principal"
+  ],
+  "header_fragment_merges": [
+    ["Year-to-", "Date"],
+    ["Month-to-", "Date"],
+    ["Quarter-to-", "Date"]
+  ]
+}

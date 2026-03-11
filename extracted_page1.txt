@@ -1,0 +1,49 @@
+--- Page 1 ---
+```html
+<html><body>
+<p>REVOCABLE ADMINISTRATIVE TRUST</p> 
+ <p>Your Goldman Sachs team:</p> 
+ <p>Brandon Geer, 310-407-5561</p> 
+ <p>Michael Park, 310-407-5723</p> 
+ <p>Moises Ramirez, 310-407-5503</p> 
+ <p>Ryan Adams, 310-407-5539</p> 
+ <p>Lina Kwon, 310-407-5961</p> 
+ <p>Devin Trotter, 310-407-5860</p> 
+ <p>Charlie Trout, 310-407-5746</p> 
+ <p>GS: PREFD AND HYBRID SECURITIES</p> 
+ <p>Statement Detail</p> 
+ <p>Period Covering December 01, 2025 to December 31, 2025</p> 
+ <p>Page</p> 
+ <p>GS: PREFD AND HYBRID SECURITIES</p> 
+ <p>1</p> 
+ <p>General Information</p> 
+ <p>2</p> 
+ <p>Overview</p> 
+ <p>3</p> 
+ <p>US Tax Summary</p> 
+ <p>4</p> 
+ <p>Holdings</p> 
+ <p>6</p> 
+ <p>Tax Details</p> 
+ <p>22</p> 
+ <p>Investment Activity</p> 
+ <p>17</p> 
+ <p>Cash Activity</p> 
+ <p>18</p> 
+ <p>Bank Statement</p> 
+ <p>21</p> 
+ <p>Realized Gains and Losses</p> 
+ <p>40</p> 
+ <p>Deposits and Withdrawals</p> 
+ <p>42</p> 
+ <p>Report Disclosures</p> 
+ <p>51</p> 
+ <p>Portfolio No: XXX-XX366-3</p> 
+ <p>Page 1 of 54</p> 
+ <p>ADMINISTRATIVE TRUST</p> 
+ <p>RECYCLED</p> 
+ <p>Paper made from</p> 
+ <p>recycled materials</p> 
+ <p>FSC C101537</p> 
+</body></html>
+```

@@ -1,0 +1,20 @@
+# Vision-language extraction (Qwen2.5-VL). Install after requirements.txt.
+# Then run: python scripts/download_qwen2vl.py  (download model once)
+#         python -m extract_vl path/to/file.pdf  (or use from code)
+#
+# --- GPU (Windows, NVIDIA) ---
+# After building with scripts/build_llama_cpp_cuda.ps1, llama.dll needs CUDA runtime DLLs.
+# extract_vl sets CUDA_PATH (and PATH) from common install paths before importing;
+# if load still fails, set CUDA_PATH to your CUDA root (e.g. ...\CUDA\v13.2) or use CPU build.
+# Option A — Use CUDA 13.2 (build from source):
+#   Requires: CMake (https://cmake.org) and Visual Studio 2022 with "Desktop development with C++".
+#   Run: .\scripts\build_llama_cpp_cuda.ps1   (with venv activated)
+#   This builds against your installed CUDA 13.2; no need for CUDA 12.x.
+# Option B — Use pre-built wheel (CUDA 12.x only):
+#   Install CUDA 12.8, add its bin to PATH, then:
+#   pip uninstall llama-cpp-python -y
+#   pip install "https://huggingface.co/.../llama_cpp_python-0.3.8%2Bcu128.gemma3-cp311-cp311-win_amd64.whl"
+# --- Linux GPU: pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121 ---
+
+huggingface_hub>=0.20.0
+llama-cpp-python>=0.2.0

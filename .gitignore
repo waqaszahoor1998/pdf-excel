@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.xlsx
+*.pdf
+uploads/
+output/
+models/
