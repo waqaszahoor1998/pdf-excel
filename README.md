@@ -116,10 +116,13 @@ Use `-o path/to/out.xlsx` to set the output path. Default output directory is `o
    python scripts/download_qwen2vl.py
    ```
 
-2. Extract to JSON, then to Excel:
+2. Extract to JSON (you can limit pages with `--max-pages N`, e.g. first 5 pages), then convert that JSON to Excel:
 
    ```bash
-   python -m extract_vl path/to/scanned.pdf --json output/report.json --max-pages 20
+   # PDF → JSON (e.g. first 5 pages only)
+   python -m extract_vl path/to/scanned.pdf --json output/report.json --max-pages 5
+
+   # JSON → Excel
    python run.py from-json output/report.json -o output/report.xlsx
    ```
 

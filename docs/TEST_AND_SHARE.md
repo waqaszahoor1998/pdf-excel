@@ -66,9 +66,12 @@ python -m extract_vl "path\to\scanned.pdf" --max-pages 2
 ```
 You should see log lines like `VL page 1/2`, `VL page 2/2`, then extracted text.
 
-**Test VL → JSON → Excel:**
+**Test VL → JSON → Excel (two commands):**
 ```powershell
-python -m extract_vl "path\to\scanned.pdf" --json output\report.json --max-pages 3
+# 1. PDF → JSON (use --max-pages N to process only the first N pages, e.g. 5)
+python -m extract_vl "path\to\scanned.pdf" --json output\report.json --max-pages 5
+
+# 2. JSON → Excel
 python run.py from-json output\report.json -o output\report.xlsx
 ```
 - Check `output\report.json`: sections with `name`, `headings`, `rows`.
