@@ -482,7 +482,7 @@ def _is_prose_row(row: list) -> bool:
     # Keep rows that clearly have table data (so we don't drop "ABC TRUST, E79271004, $15,088,442..." with bleed)
     if _row_has_table_data(row):
         return False
-    # Keep rows that look like table column headers (e.g. "Beginning Market Value", "Net Deposits (Withdrawals)", "Investment Results")
+    # Keep rows that look like table column headers (so we never drop the header row)
     text = " ".join(str(c).strip() for c in cells).lower()
     if any(
         phrase in text
@@ -495,8 +495,21 @@ def _is_prose_row(row: list) -> bool:
             "year to date",
             "inception to date",
             "quarter to date",
+            "account name",
+            "market value",
+            "cash in",
+            "cash out",
+            "quantity",
+            "market price",
+            "unit cost",
+            "adjusted cost",
+            "unrealized gain",
+            "yield to maturity",
         )
     ):
+        return False
+    # Row with 2+ short cells and no long prose is likely a table header
+    if len(cells) >= 2 and all(len(str(c).strip()) < 50 for c in cells) and len(text) < 120:
         return False
     # Explicit disclaimer / blank page
     if "this page intentionally left blank" in text:

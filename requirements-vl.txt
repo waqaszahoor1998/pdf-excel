@@ -5,7 +5,7 @@
 # --- GPU (Windows, NVIDIA) ---
 # After building with scripts/build_llama_cpp_cuda.ps1, llama.dll needs CUDA runtime DLLs.
 # extract_vl sets CUDA_PATH (and PATH) from common install paths before importing;
-# if load still fails, set CUDA_PATH to your CUDA root (e.g. ...\CUDA\v13.2) or use CPU build.
+# if load still fails, set CUDA_PATH (and add CUDA bin to PATH) before Python; do not switch to CPU build (see docs/VL_GPU_WHY_AND_FIX.md).
 # Option A — Use CUDA 13.2 (build from source):
 #   Requires: CMake (https://cmake.org) and Visual Studio 2022 with "Desktop development with C++".
 #   Run: .\scripts\build_llama_cpp_cuda.ps1   (with venv activated)

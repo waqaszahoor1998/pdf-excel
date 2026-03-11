@@ -6,7 +6,8 @@ Run: flask --app app run
 Or:  python app.py
 
 Then open http://127.0.0.1:5000 — upload a PDF, get all tables as Excel.
-Extraction uses pdfplumber only; no raw data is sent to any cloud service.
+Extraction: default uses pdfplumber (digital PDFs). If "Use vision model" is checked,
+uses local Qwen2.5-VL for scanned/image-only PDFs (model must be installed). No raw data is sent to any cloud service.
 """
 
 import io
@@ -52,6 +53,16 @@ def _ai_available():
     return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
 
 
+def _vl_available():
+    """True if VL extraction (Qwen2.5-VL) is installed and model is present."""
+    try:
+        from extract_vl import _model_paths
+        model_path, mmproj_path = _model_paths()
+        return model_path and Path(model_path).exists() and mmproj_path and Path(mmproj_path).exists()
+    except Exception:
+        return False
+
+
 @app.errorhandler(RequestEntityTooLarge)
 def too_large(e):
     flash(f"File too large. Maximum size is {_get_upload_limit_mb()} MB.")
@@ -64,6 +75,7 @@ def index():
         "index.html",
         max_mb=_get_upload_limit_mb(),
         ai_available=_ai_available(),
+        vl_available=_vl_available(),
     )
 
 
@@ -104,12 +116,41 @@ def extract():
 
         out_path = Path(tmp_dir) / "output.xlsx"
         json_path = Path(tmp_dir) / "output.json"
+        use_vl = (request.form.get("use_vl") or "").strip().lower() in ("on", "1", "yes", "true")
         if use_ai:
             from config import load_config
             from extract import extract_pdf_to_excel
             cfg = load_config()
             result = extract_pdf_to_excel(str(pdf_path), query, str(out_path), config=cfg)
             json_path = None  # AI path does not produce JSON in same format
+        elif use_vl:
+            # Vision model path: PDF → VL → JSON → Excel (for scanned PDFs)
+            try:
+                from extract_vl import pdf_to_json_vl
+                vl_max_pages = 20  # limit for web to avoid long waits
+                json_path = Path(tmp_dir) / "output.json"
+                pdf_to_json_vl(str(pdf_path), str(json_path), max_pages=vl_max_pages)
+                sections = load_sections_from_json(json_path)
+                with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+                    temp_xlsx = f.name
+                try:
+                    _write_sections_to_workbook(sections, Path(temp_xlsx))
+                    transform_extracted_to_qb(temp_xlsx, str(out_path))
+                finally:
+                    Path(temp_xlsx).unlink(missing_ok=True)
+                result = str(out_path)
+            except ImportError as e:
+                log.exception("VL extract: import failed")
+                flash("Vision model not available. Install requirements-vl.txt and run scripts/download_qwen2vl.py.")
+                return redirect(url_for("index"))
+            except FileNotFoundError as e:
+                log.exception("VL extract: model or file not found")
+                flash("Vision model files not found. Run scripts/download_qwen2vl.py to download the model.")
+                return redirect(url_for("index"))
+            except Exception as e:
+                log.exception("VL extract: %s", e)
+                flash(f"Vision extraction failed: {e}")
+                return redirect(url_for("index"))
         else:
             result = pdf_to_qb_excel(
                 str(pdf_path), str(out_path), overwrite=True, json_path_out=str(json_path)

@@ -61,13 +61,48 @@ dir "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\bin\cudart*.dll"
 
 If that path is missing or empty, (re)install the **CUDA Toolkit 13.2** (not only the driver) and ensure the **bin** directory contains the runtime DLLs.
 
-### 3. Fallback: use the CPU build
+### 3. Do **not** switch to CPU
 
-If you cannot get the CUDA DLLs found:
+**Do not** uninstall the CUDA build or reinstall the CPU-only wheel (`pip install llama-cpp-python`). That removes your GPU setup and forces a long re-build of the CUDA wheel. Prefer to **fix the GPU path**:
+
+- Set **CUDA_PATH** and add CUDA `bin` to **PATH** before starting Python (see sections 1 and 2).
+- If the DLL error persists, check that the CUDA Toolkit version matches the build (e.g. 13.2) and that `bin` contains `cudart64_132.dll` (or the version you built with).
+- Re-run the build script if needed: `.\scripts\build_llama_cpp_cuda.ps1` (with CUDA in PATH).
+
+---
+
+## How to test VL extraction (GPU)
+
+**1. Set CUDA so the DLL loads (same terminal you’ll run the test in):**
 
 ```powershell
-pip uninstall llama-cpp-python -y
-pip install llama-cpp-python
+$env:CUDA_PATH = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2"
+$env:Path = "$env:CUDA_PATH\bin;$env:Path"
 ```
 
-Then run `extract_vl` as usual; it will use the CPU (slower but no CUDA dependencies).
+**2. Quick sanity check (model load):**
+
+```powershell
+cd C:\Users\TechMatched\Desktop\pdf-excel-3.0
+.\venv\Scripts\Activate.ps1
+python -c "from llama_cpp import Llama; print('OK')"
+```
+
+If you see `OK`, the GPU build is loading. If you see a DLL error, fix CUDA_PATH/PATH or the CUDA install; do **not** reinstall the CPU wheel.
+
+**3. Run VL on a PDF (text output):**
+
+```powershell
+python -m extract_vl "C:\path\to\your.pdf" --max-pages 2
+```
+
+You should see `INFO: Loading VL model...`, then `INFO: VL page 1/2`, `INFO: VL page 2/2`, then extracted text. Limit to 2 pages for a fast test.
+
+**4. Run VL and get JSON (then Excel):**
+
+```powershell
+python -m extract_vl "C:\path\to\your.pdf" --json output\report.json --max-pages 2
+python run.py from-json output\report.json -o output\report.xlsx
+```
+
+Check `output\report.json` and `output\report.xlsx`. Use your real PDF path instead of `C:\path\to\your.pdf`.

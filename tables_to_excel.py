@@ -84,6 +84,17 @@ REPORT_TITLE_TO_SHEET = [
     (re.compile(r"cash\s+[&]\s+fixed\s+income", re.I), "Cash & Fixed Income"),
     (re.compile(r"equity\s+summary", re.I), "Equity Summary"),
     (re.compile(r"equity\s+detail", re.I), "Equity Detail"),
+    # Broker statement sections (e.g. GS Preferred and Hybrid, JPM statements)
+    (re.compile(r"unrealized\s+gain\s*\(?\s*loss\s*\)?", re.I), "Unrealized"),
+    (re.compile(r"holdings(?:\s+\(continued\))?", re.I), "Holdings"),
+    (re.compile(r"cash\s+activity(?:\s+\(continued\))?", re.I), "Cash Activity"),
+    (re.compile(r"dividends?\s+and\s+distributions?", re.I), "Dividends and Distributions"),
+    (re.compile(r"fixed\s+income", re.I), "Fixed Income"),
+    (re.compile(r"reportable\s+income", re.I), "Reportable Income"),
+    (re.compile(r"reportable\s+interest", re.I), "Reportable Interest"),
+    (re.compile(r"purchases?\s*[&]\s*sales?", re.I), "Purchases and Sales"),
+    (re.compile(r"realized\s+capital\s+gains?", re.I), "Realized Capital Gains"),
+    (re.compile(r"portfolio\s+information", re.I), "Portfolio Information"),
 ]
 
 
@@ -106,11 +117,23 @@ def _get_title_to_sheet_config() -> list[tuple[re.Pattern, str]]:
 _get_title_to_sheet_config._cache = None  # type: ignore[attr-defined]
 
 
+def _normalize_section_name_for_lookup(text: str) -> str:
+    """Strip ' (Continued)', ' (Continued)1', etc., so continuations map to the same sheet as the base section."""
+    if not (text and isinstance(text, str)):
+        return ""
+    s = text.strip()
+    # Remove " (Continued)" or " (Continued)1", " (Continued)2", etc.
+    s = re.sub(r"\s*\(Continued\)\s*\d*\s*$", "", s, flags=re.I).strip()
+    return s
+
+
 def _preferred_sheet_name_from_title(text: str) -> str | None:
     """If text matches a known report type (built-in or config), return the target sheet name; else None."""
     if not (text and isinstance(text, str)):
         return None
-    s = text.strip()
+    s = _normalize_section_name_for_lookup(text)
+    if not s:
+        return None
     # Config first (so your PDF's titles override built-in)
     for pattern, sheet_name in _get_title_to_sheet_config():
         if pattern.search(s):
@@ -662,6 +685,19 @@ def _normalize_table_rows(data_rows: list) -> list[list]:
     return out
 
 
+def _is_single_header_row(heading_rows: list) -> bool:
+    """True if heading_rows is a single row of column headers (e.g. from JSON/VL: ["Account Name", "Market Value", ...])."""
+    if not heading_rows or len(heading_rows) < 2:
+        return False
+    for h in heading_rows:
+        if not isinstance(h, str):
+            return False
+        s = (h or "").strip()
+        if ":" in s or "  " in s or len(s) > 80:
+            return False
+    return True
+
+
 def _write_section_to_sheet(
     ws, sec_name: str, heading_rows: list, data_rows: list, start_row: int = 1, bold_data_row_indices: set | None = None
 ) -> int:
@@ -669,10 +705,25 @@ def _write_section_to_sheet(
     Write one section to a worksheet like the PDF: section title, optional summary table,
     then the main data table with header row and columns. Uses bold for title and table header.
     If bold_data_row_indices is set (0-based indices into data_rows), those data rows are written bold to match PDF.
+    Handles both PDF-style heading lines and a single row of column headers (from JSON/VL) for QB-style output.
     Returns the next row number after this section (so callers can append more sections).
     """
     bold_data_row_indices = bold_data_row_indices or set()
-    title, summary_rows, table_header_lines = _parse_summary_lines(heading_rows)
+    # Single row of column headers (e.g. from VL/JSON): use as table header row directly for clean QB-style sheets
+    if _is_single_header_row(heading_rows):
+        title = (sec_name or "Section").strip()
+        summary_rows = []
+        combined_data = [[str(h).strip() for h in heading_rows]] + _drop_page_number_rows(data_rows)
+        skip_merge = True  # keep header row unchanged
+    else:
+        title, summary_rows, table_header_lines = _parse_summary_lines(heading_rows)
+        combined_data = []
+        for line in table_header_lines:
+            parts = re.split(r"  +", line)
+            combined_data.append(parts if len(parts) > 1 else [line])
+        combined_data.extend(_drop_page_number_rows(data_rows))
+        skip_merge = False
+
     row_num = start_row
 
     # Section title (bold)
@@ -687,34 +738,33 @@ def _write_section_to_sheet(
             row_num += 1
         row_num += 1  # blank row after summary
 
-    # Prepend any header lines (that were above the table in the PDF) to the data table; drop PDF page-number footer rows
-    combined_data = []
-    for line in table_header_lines:
-        parts = re.split(r"  +", line)
-        combined_data.append(parts if len(parts) > 1 else [line])
-    combined_data.extend(_drop_page_number_rows(data_rows))
     data_rows = combined_data
 
-    # Merge multi-line column headers (e.g. "Beginning" + "Market Value" → one header "Beginning Market Value"; first column "-" when empty)
-    data_rows = _merge_multi_line_header_rows(data_rows)
+    # Merge multi-line column headers only when not already a clean single header row (avoids dropping/changing headers)
+    if not skip_merge:
+        data_rows = _merge_multi_line_header_rows(data_rows)
 
     # Main data table: header row + data rows
     table_rows = _normalize_table_rows(data_rows)
+    # Drop all-blank rows so we don't write empty lines
+    table_rows = [r for r in table_rows if r and any(str(c or "").strip() for c in r)]
     if not table_rows:
         if row_num == start_row + 1 and not summary_rows:
             ws.cell(row=row_num, column=1, value="(No table data)")
             row_num += 1
         return row_num
 
-    # Avoid duplicate section title: if first row is only the section title, drop it; if first cell of header row equals section title, use "-" for that cell
+    # Avoid duplicate section title: only drop first row if it's clearly a title repeat (single non-empty cell matching title), not a real header row
     if title and len(table_rows) >= 1:
         first_row = table_rows[0]
         first_cell = str(first_row[0] or "").strip() if first_row else ""
+        non_empty_count = sum(1 for c in (first_row or []) if str(c or "").strip())
         rest_empty = all(not str(c or "").strip() for c in (first_row[1:] if len(first_row) > 1 else []))
-        if first_cell and rest_empty and first_cell.upper() == title.upper():
+        if non_empty_count >= 2:
+            pass  # real header row (multiple columns) — never drop
+        elif first_cell and rest_empty and first_cell.upper() == title.upper():
             table_rows = table_rows[1:]
         elif first_cell and first_cell.upper() == title.upper():
-            # First cell of header row repeats section title (e.g. INVESTMENT RESULTS); use "-" for row-label column
             table_rows = [["-"] + list(first_row[1:])] + list(table_rows[1:])
     if not table_rows:
         return row_num
@@ -1501,30 +1551,48 @@ def _write_sections_to_workbook(
             next_row += 2
         sheet_count = 1
     else:
-        used_sheet_names = {}
+        # Group sections by sheet name so "Holdings (Continued)", "Holdings (Continued)1" → one "Holdings" sheet
+        groups = {}  # sheet_key -> list of (sec_name, heading_rows, data_rows, bold_indices)
         for idx, s in enumerate(sections):
             sec_name, heading_rows, data_rows = s[0], s[1], s[2]
             preferred = _preferred_sheet_name_from_title(sec_name)
             if not preferred and heading_rows:
-                preferred = _preferred_sheet_name_from_title(heading_rows[0])
+                preferred = _preferred_sheet_name_from_title(
+                    heading_rows[0] if isinstance(heading_rows[0], str) else ""
+                )
             if preferred:
-                base = _safe_sheet_name(preferred, idx + 1)
-                count = used_sheet_names.get(base, 0) + 1
-                used_sheet_names[base] = count
-                if count > 1:
-                    # Keep base + " " + count within 31 chars so Excel accepts the file
-                    suffix = f" {count}"
-                    base = (base.strip() or base)[: 31 - len(suffix)]
-                    name = _safe_sheet_name(f"{base}{suffix}", idx + 1)
-                else:
-                    name = base
+                sheet_key = _safe_sheet_name(preferred, idx + 1)
             else:
-                name = _safe_sheet_name(sec_name, idx + 1)
-            ws = wb.create_sheet(title=name[:31])
+                # Use normalized name so continuations merge even without a pattern match
+                norm = _normalize_section_name_for_lookup(sec_name)
+                sheet_key = _safe_sheet_name(norm or sec_name, idx + 1)
+            if sheet_key not in groups:
+                groups[sheet_key] = []
             bold_indices = s[4] if len(s) >= 5 else None
-            _write_section_to_sheet(ws, sec_name, heading_rows, data_rows, bold_data_row_indices=bold_indices)
-            log.debug("excel sheet=%s section=%s rows=%d", name, (sec_name or "")[:40], len(data_rows or []))
-        sheet_count = len(sections)
+            groups[sheet_key].append((sec_name, heading_rows, data_rows, bold_indices))
+
+        used_sheet_names = {}
+        for sheet_key, group_sections in groups.items():
+            base = sheet_key
+            count = used_sheet_names.get(base, 0) + 1
+            used_sheet_names[base] = count
+            if count > 1:
+                suffix = f" {count}"
+                base = (base.strip() or base)[: 31 - len(suffix)]
+                name = _safe_sheet_name(f"{base}{suffix}", 0)
+            else:
+                name = base
+            ws = wb.create_sheet(title=name[:31])
+            row_num = 1
+            for i, (sec_name, heading_rows, data_rows, bold_indices) in enumerate(group_sections):
+                row_num = _write_section_to_sheet(
+                    ws, sec_name, heading_rows, data_rows, start_row=row_num, bold_data_row_indices=bold_indices
+                )
+                # Blank row between merged sections (except after the last)
+                if i < len(group_sections) - 1:
+                    row_num += 1
+            log.debug("excel sheet=%s sections=%d", name, len(group_sections))
+        sheet_count = len(groups)
     wb.save(out_path)
     return sheet_count
 

@@ -1,8 +1,10 @@
 {
-  "_comment": "Add phrases, fragment merges, or title→sheet name mappings for your PDFs without code changes.",
+  "_comment": "Add phrases, fragment merges, or title→sheet name mappings for your PDFs without code changes. Section names like 'X (Continued)' are normalized so they map to the same sheet as 'X'.",
   "title_to_sheet": [
     ["statement of holdings", "Holdings"],
     ["holdings summary", "Holdings Summary"],
+    ["holdings \\(continued\\)", "Holdings"],
+    ["cash activity \\(continued\\)", "Cash Activity"],
     ["gs preferred", "GS Preferred"],
     ["hybrid securities", "Hybrid Securities"]
   ],
