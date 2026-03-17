@@ -11,9 +11,19 @@ import argparse
 import sys
 from pathlib import Path
 
+
 def _get_version():
     p = Path(__file__).resolve().parent / "VERSION"
     return p.read_text().strip() if p.exists() else "0.0.0"
+
+
+# Set CUDA before any VL/llama_cpp use so GPU is used
+try:
+    from extract_vl import _ensure_cuda_path
+
+    _ensure_cuda_path()
+except ImportError:
+    pass
 
 # Project modules
 from tables_to_excel import pdf_tables_to_excel, pdf_to_json, json_to_excel
@@ -84,8 +94,50 @@ def cmd_tables(args) -> int:
     return 0
 
 
+def cmd_clean_json(args) -> int:
+    """Remove repetitive sections from extraction JSON. When --pdf is given, only collapse/drop when the repeated phrase appears few times on that PDF page (compare with source). Overwrites the file."""
+    import json as _json
+    from extract_vl import _drop_repetitive_sections, pdf_phrase_count_for_file
+
+    json_path = Path(args.json_file)
+    if not json_path.exists():
+        print(f"Error: File not found: {json_path}", file=sys.stderr)
+        return 1
+    with open(json_path, encoding="utf-8") as f:
+        payload = _json.load(f)
+    sections = payload.get("sections") or []
+    if not sections:
+        print("No sections to clean.", file=sys.stderr)
+        return 0
+    pdf_path = getattr(args, "pdf", None)
+    if not pdf_path:
+        meta = payload.get("meta") or {}
+        if meta.get("pdf_path") and Path(meta["pdf_path"]).exists():
+            pdf_path = meta["pdf_path"]
+        elif meta.get("pdf_name"):
+            candidate = json_path.parent / meta["pdf_name"]
+            if candidate.exists():
+                pdf_path = candidate
+    pdf_phrase_count = None
+    if pdf_path and Path(pdf_path).exists():
+        pdf_phrase_count = pdf_phrase_count_for_file(pdf_path)
+        if pdf_phrase_count:
+            print(f"Using PDF for comparison: {pdf_path}")
+    before = len(sections)
+    sections = _drop_repetitive_sections(sections, pdf_phrase_count=pdf_phrase_count)
+    after = len(sections)
+    payload["sections"] = sections
+    with open(json_path, "w", encoding="utf-8") as f:
+        _json.dump(payload, f, indent=2, ensure_ascii=False)
+    print(f"Cleaned: {before} -> {after} sections (removed {before - after} repetitive). Saved: {json_path}")
+    return 0
+
+
 def cmd_from_json(args) -> int:
-    """Convert a JSON file (from pdf→json) to Excel. Use after editing JSON to map tables correctly."""
+    """Convert a JSON file (from pdf→json) to Excel. Use after editing JSON to map tables correctly.
+    If the JSON has meta.page_to_sheet or config has page_to_sheet, sections are grouped by page
+    into sheets (e.g. page 2 → General Information, page 3 → Overview, pages 4–5 → US Tax Summary).
+    """
     json_path = Path(args.json_file)
     if not json_path.exists():
         print(f"Error: File not found: {json_path}", file=sys.stderr)
@@ -100,16 +152,39 @@ def cmd_from_json(args) -> int:
         print(f"Error: Output exists: {out_path} (use --overwrite to replace)", file=sys.stderr)
         return 1
     try:
+        import json as _json
         import tempfile
-        from tables_to_excel import load_sections_from_json, _write_sections_to_workbook
+        from tables_to_excel import (
+            load_sections_from_json,
+            _write_sections_to_workbook,
+            write_sections_to_workbook_by_page,
+            _normalize_page_to_sheet,
+        )
+
         sections = load_sections_from_json(json_path)
-        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
-            temp_xlsx = f.name
-        try:
-            _write_sections_to_workbook(sections, Path(temp_xlsx))
-            transform_extracted_to_qb(temp_xlsx, str(out_path))
-        finally:
-            Path(temp_xlsx).unlink(missing_ok=True)
+        # Prefer page_to_sheet from JSON meta, then from config/vl.json
+        page_to_sheet = {}
+        with open(json_path, encoding="utf-8") as f:
+            payload = _json.load(f)
+        meta = payload.get("meta") or {}
+        page_to_sheet = _normalize_page_to_sheet(meta.get("page_to_sheet") or {})
+        if not page_to_sheet:
+            vl_config_path = Path(__file__).resolve().parent / "config" / "vl.json"
+            if vl_config_path.exists():
+                with open(vl_config_path, encoding="utf-8") as f:
+                    vl_cfg = _json.load(f)
+                page_to_sheet = _normalize_page_to_sheet(vl_cfg.get("page_to_sheet") or {})
+        has_page = any(len(s) >= 4 and s[3] is not None for s in sections)
+        if page_to_sheet and has_page:
+            write_sections_to_workbook_by_page(sections, page_to_sheet, out_path)
+        else:
+            with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+                temp_xlsx = f.name
+            try:
+                _write_sections_to_workbook(sections, Path(temp_xlsx))
+                transform_extracted_to_qb(temp_xlsx, str(out_path))
+            finally:
+                Path(temp_xlsx).unlink(missing_ok=True)
         print(f"Saved: {out_path}")
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -204,6 +279,11 @@ def main() -> int:
     p_from_json.add_argument("-o", "--output", default=None, help="Output .xlsx path")
     p_from_json.add_argument("--no-overwrite", action="store_true", help="Do not overwrite existing output")
     p_from_json.set_defaults(func=cmd_from_json)
+
+    p_clean_json = sub.add_parser("clean-json", help="Remove repetitive sections from extraction JSON; with --pdf, only clean when PDF confirms phrase is rare on that page")
+    p_clean_json.add_argument("json_file", help="Path to .json file (extraction output)")
+    p_clean_json.add_argument("--pdf", default=None, help="Path to source PDF; if set, we only collapse/drop when the repeated phrase appears ≤10 times on that page")
+    p_clean_json.set_defaults(func=cmd_clean_json)
 
     # ask: PDF(s) + query
     p_ask = sub.add_parser("ask", help="AI agent: extract what you ask for from PDF(s)")
