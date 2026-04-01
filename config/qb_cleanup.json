@@ -1,0 +1,40 @@
+{
+  "_comment": "Add phrases, fragment merges, or title→sheet name mappings for your PDFs without code changes. Section names like 'X (Continued)' are normalized so they map to the same sheet as 'X'.",
+  "title_to_sheet": [
+    ["statement of holdings", "Holdings"],
+    ["holdings summary", "Holdings Summary"],
+    ["holdings \\(continued\\)", "Holdings"],
+    ["cash activity \\(continued\\)", "Cash Activity"],
+    ["gs preferred", "GS Preferred"],
+    ["hybrid securities", "Hybrid Securities"],
+
+    // JPM / combined statement generic section routing (enables PLSummary builder + template population)
+    ["account summary", "Account Summary"],
+    ["asset allocation", "Asset Allocation"],
+    ["portfolio activity", "Portfolio Activity"],
+    ["tax summary", "Tax Summary"],
+    ["broker info", "Broker Info"],
+    ["general information", "Broker Info"],
+    ["cash[ &]+fixed income", "Cash & Fixed Income"],
+    ["equity (summary|detail)", "Equity Detail"],
+    ["interest on usd cash", "Interest on USD Cash"]
+  ],
+  "footer_phrases": [
+    "available online",
+    "form 1099",
+    "if you have not",
+    "\"form\") will",
+    "this page intentionally left blank",
+    "please see disclosure",
+    "not fdic insured",
+    "not insured by any government",
+    "not a deposit",
+    "subject to investment risks",
+    "possible loss of the principal"
+  ],
+  "header_fragment_merges": [
+    ["Year-to-", "Date"],
+    ["Month-to-", "Date"],
+    ["Quarter-to-", "Date"]
+  ]
+}

@@ -1,0 +1,332 @@
+#!/usr/bin/env python3
+"""
+Web UI for PDF → Excel (local only, no cloud LLM).
+
+Run: flask --app app run
+Or:  python app.py
+
+Then open http://127.0.0.1:5000 — upload a PDF, get all tables as Excel.
+Extraction: default uses pdfplumber (digital PDFs). If "Use vision model" is checked,
+uses local Qwen2.5-VL for scanned/image-only PDFs (model must be installed). No raw data is sent to any cloud service.
+"""
+
+import io
+import logging
+import os
+import tempfile
+import zipfile
+from pathlib import Path
+
+from dotenv import load_dotenv
+from flask import Flask, render_template, request, send_file, flash, redirect, url_for
+from werkzeug.exceptions import RequestEntityTooLarge
+
+_env_path = Path(__file__).resolve().parent / ".env"
+load_dotenv(_env_path)
+# Set CUDA before any VL/llama_cpp use so GPU is used
+try:
+    from extract_vl import _ensure_cuda_path
+    _ensure_cuda_path()
+except ImportError:
+    pass
+log = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
+
+from tables_to_excel import (
+    extract_sections_from_pdf,
+    _write_json_from_sections,
+    load_sections_from_json,
+    _write_sections_to_workbook,
+    write_sections_to_workbook_by_page,
+    _normalize_page_to_sheet,
+)
+from pdf_to_qb import pdf_to_qb_excel, transform_extracted_to_qb
+
+app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-in-production")
+
+# Max upload size for PDFs (from env or default)
+APP_ROOT = Path(__file__).resolve().parent
+_val = (os.environ.get("MAX_UPLOAD_MB") or "").strip() or "40"
+_default_mb = max(1, min(100, int(_val) if _val.isdigit() else 40))
+MAX_CONTENT_LENGTH = _default_mb * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
+
+
+def _get_upload_limit_mb():
+    return MAX_CONTENT_LENGTH // (1024 * 1024)
+
+
+def _ai_available():
+    return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
+
+
+def _vl_available():
+    """True if VL extraction (Qwen2.5-VL) is installed and model is present."""
+    try:
+        from extract_vl import _model_paths
+        model_path, mmproj_path = _model_paths()
+        return model_path and Path(model_path).exists() and mmproj_path and Path(mmproj_path).exists()
+    except Exception:
+        return False
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def too_large(e):
+    flash(f"File too large. Maximum size is {_get_upload_limit_mb()} MB.")
+    return redirect(url_for("index"))
+
+
+@app.route("/")
+def index():
+    return render_template(
+        "index.html",
+        max_mb=_get_upload_limit_mb(),
+        ai_available=_ai_available(),
+        vl_available=_vl_available(),
+    )
+
+
+@app.route("/extract", methods=["POST"])
+def extract():
+    if "pdf" not in request.files:
+        log.warning("extract: no file in request")
+        flash("No file selected.")
+        return redirect(url_for("index"))
+
+    file = request.files["pdf"]
+    if not file or file.filename == "":
+        log.warning("extract: empty filename")
+        flash("No file selected.")
+        return redirect(url_for("index"))
+
+    if not file.filename.lower().endswith(".pdf"):
+        flash("Please upload a PDF file.")
+        return redirect(url_for("index"))
+
+    mode = (request.form.get("mode") or "offline").strip().lower()
+    query = (request.form.get("query") or "").strip()
+    if mode == "ai":
+        if not query:
+            flash("Enter a query for Ask AI (e.g. 'taxes for January').")
+            return redirect(url_for("index"))
+        if not _ai_available():
+            flash("Ask AI requires ANTHROPIC_API_KEY in .env.")
+            return redirect(url_for("index"))
+
+    tmp_dir = None
+    try:
+        tmp_dir = tempfile.mkdtemp()
+        pdf_path = Path(tmp_dir) / "upload.pdf"
+        file.save(str(pdf_path))
+        use_ai = mode == "ai" and query and _ai_available()
+        log.info("extract: saved upload (mode=%s)", "ai" if use_ai else "offline")
+
+        out_path = Path(tmp_dir) / "output.xlsx"
+        json_path = Path(tmp_dir) / "output.json"
+        use_vl = (request.form.get("use_vl") or "").strip().lower() in ("on", "1", "yes", "true")
+        if use_ai:
+            from config import load_config
+            from extract import extract_pdf_to_excel
+            cfg = load_config()
+            result = extract_pdf_to_excel(str(pdf_path), query, str(out_path), config=cfg)
+            json_path = None  # AI path does not produce JSON in same format
+        elif use_vl:
+            # Vision model path: PDF → VL → JSON → Excel (for scanned PDFs)
+            try:
+                from extract_vl import pdf_to_json_vl
+                vl_max_pages = 20  # limit for web to avoid long waits
+                json_path = Path(tmp_dir) / "output.json"
+                pdf_to_json_vl(str(pdf_path), str(json_path), max_pages=vl_max_pages)
+                sections = load_sections_from_json(json_path)
+                with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+                    temp_xlsx = f.name
+                try:
+                    _write_sections_to_workbook(sections, Path(temp_xlsx))
+                    transform_extracted_to_qb(temp_xlsx, str(out_path))
+                finally:
+                    Path(temp_xlsx).unlink(missing_ok=True)
+                result = str(out_path)
+            except ImportError as e:
+                log.exception("VL extract: import failed")
+                flash("Vision model not available. Install requirements-vl.txt and run scripts/download_qwen2vl.py.")
+                return redirect(url_for("index"))
+            except FileNotFoundError as e:
+                log.exception("VL extract: model or file not found")
+                flash("Vision model files not found. Run scripts/download_qwen2vl.py to download the model.")
+                return redirect(url_for("index"))
+            except Exception as e:
+                log.exception("VL extract: %s", e)
+                flash(f"Vision extraction failed: {e}")
+                return redirect(url_for("index"))
+        else:
+            result = pdf_to_qb_excel(
+                str(pdf_path), str(out_path), overwrite=True, json_path_out=str(json_path)
+            )
+
+        if not Path(result).exists():
+            log.error("extract: result file missing %s", result)
+            flash("Conversion produced no file.")
+            return redirect(url_for("index"))
+
+        base_name = Path(file.filename).stem
+        if json_path and json_path.exists():
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.write(result, f"{base_name}.xlsx")
+                zf.write(json_path, f"{base_name}.json")
+            buf.seek(0)
+            log.info("extract: sending zip with %s.xlsx and %s.json", base_name, base_name)
+            return send_file(
+                buf,
+                as_attachment=True,
+                download_name=f"{base_name}.zip",
+                mimetype="application/zip",
+            )
+        download_name = f"{base_name}.xlsx"
+        log.info("extract: sending file %s", download_name)
+        return send_file(
+            result,
+            as_attachment=True,
+            download_name=download_name,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    except FileNotFoundError as e:
+        log.exception("extract: FileNotFoundError")
+        flash(str(e))
+        return redirect(url_for("index"))
+    except ValueError as e:
+        log.exception("extract: ValueError")
+        flash(str(e))
+        return redirect(url_for("index"))
+    except Exception as e:
+        log.exception("extract: %s", e)
+        flash(f"Error: {e}")
+        return redirect(url_for("index"))
+    finally:
+        if tmp_dir and Path(tmp_dir).exists():
+            try:
+                for f in Path(tmp_dir).iterdir():
+                    f.unlink(missing_ok=True)
+                Path(tmp_dir).rmdir()
+            except OSError:
+                pass
+
+
+@app.route("/pdf-to-json", methods=["POST"])
+def pdf_to_json_route():
+    """Step 1: PDF → JSON only. Download the JSON so you can edit it, then use JSON → Excel."""
+    if "pdf" not in request.files:
+        flash("No file selected.")
+        return redirect(url_for("index"))
+    file = request.files["pdf"]
+    if not file or file.filename == "":
+        flash("No file selected.")
+        return redirect(url_for("index"))
+    if not file.filename.lower().endswith(".pdf"):
+        flash("Please upload a PDF file.")
+        return redirect(url_for("index"))
+    tmp_dir = None
+    try:
+        tmp_dir = tempfile.mkdtemp()
+        pdf_path = Path(tmp_dir) / "upload.pdf"
+        file.save(str(pdf_path))
+        json_path = Path(tmp_dir) / "output.json"
+        sections = extract_sections_from_pdf(str(pdf_path))
+        _write_json_from_sections(sections, json_path, overwrite=True)
+        if not json_path.exists():
+            flash("Conversion produced no JSON.")
+            return redirect(url_for("index"))
+        base_name = Path(file.filename).stem
+        download_name = f"{base_name}.json"
+        return send_file(
+            str(json_path),
+            as_attachment=True,
+            download_name=download_name,
+            mimetype="application/json",
+        )
+    except Exception as e:
+        log.exception("pdf-to-json: %s", e)
+        flash(f"Error: {e}")
+        return redirect(url_for("index"))
+    finally:
+        if tmp_dir and Path(tmp_dir).exists():
+            try:
+                for f in Path(tmp_dir).iterdir():
+                    f.unlink(missing_ok=True)
+                Path(tmp_dir).rmdir()
+            except OSError:
+                pass
+
+
+@app.route("/json-to-excel", methods=["POST"])
+def json_to_excel_route():
+    """Step 2: JSON → Excel. Upload JSON (from PDF→JSON or edited) to get structured xlsx.
+    If JSON meta or config has page_to_sheet, sections are grouped by page into sheets.
+    """
+    import json as _json
+    if "json_file" not in request.files:
+        flash("No file selected.")
+        return redirect(url_for("index"))
+    file = request.files["json_file"]
+    if not file or file.filename == "":
+        flash("No file selected.")
+        return redirect(url_for("index"))
+    if not file.filename.lower().endswith(".json"):
+        flash("Please upload a JSON file (from PDF→JSON step).")
+        return redirect(url_for("index"))
+    tmp_dir = None
+    try:
+        tmp_dir = tempfile.mkdtemp()
+        json_path = Path(tmp_dir) / "input.json"
+        file.save(str(json_path))
+        out_xlsx = Path(tmp_dir) / "output.xlsx"
+        sections = load_sections_from_json(json_path)
+        with open(json_path, encoding="utf-8") as f:
+            payload = _json.load(f)
+        meta = payload.get("meta") or {}
+        page_to_sheet = _normalize_page_to_sheet(meta.get("page_to_sheet") or {})
+        if not page_to_sheet:
+            vl_config_path = Path(__file__).resolve().parent / "config" / "vl.json"
+            if vl_config_path.exists():
+                with open(vl_config_path, encoding="utf-8") as f:
+                    vl_cfg = _json.load(f)
+                page_to_sheet = _normalize_page_to_sheet(vl_cfg.get("page_to_sheet") or {})
+        has_page = any(len(s) >= 4 and s[3] is not None for s in sections)
+        if page_to_sheet and has_page:
+            write_sections_to_workbook_by_page(sections, page_to_sheet, out_xlsx)
+        else:
+            with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+                temp_xlsx = f.name
+            try:
+                _write_sections_to_workbook(sections, Path(temp_xlsx))
+                transform_extracted_to_qb(temp_xlsx, str(out_xlsx))
+            finally:
+                Path(temp_xlsx).unlink(missing_ok=True)
+        if not out_xlsx.exists():
+            flash("Conversion produced no Excel file.")
+            return redirect(url_for("index"))
+        base_name = Path(file.filename).stem
+        download_name = f"{base_name}.xlsx"
+        return send_file(
+            str(out_xlsx),
+            as_attachment=True,
+            download_name=download_name,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    except Exception as e:
+        log.exception("json-to-excel: %s", e)
+        flash(f"Error: {e}")
+        return redirect(url_for("index"))
+    finally:
+        if tmp_dir and Path(tmp_dir).exists():
+            try:
+                for f in Path(tmp_dir).iterdir():
+                    f.unlink(missing_ok=True)
+                Path(tmp_dir).rmdir()
+            except OSError:
+                pass
+
+
+if __name__ == "__main__":
+    app.run(debug=True, port=5000)

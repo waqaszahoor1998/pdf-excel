@@ -1,0 +1,4 @@
+# For scripts/download_benchmark_data.py and scripts/run_benchmark_eval.py
+# Install with: pip install -r requirements-benchmark.txt
+datasets>=2.14.0
+huggingface_hub>=0.17.0

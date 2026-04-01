@@ -1,0 +1,11 @@
+{
+  "max_pdf_bytes": 33554432,
+  "max_pages": 100,
+  "query_max_length": 8000,
+  "extraction_mode": "single",
+  "prompts_dir": "prompts",
+  "use_structured_output": false,
+  "long_pdf_enabled": false,
+  "long_pdf_chunk_pages": 25,
+  "default_model": ""
+}
