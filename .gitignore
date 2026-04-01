@@ -6,6 +6,7 @@ __pycache__/
 venv/
 *.xlsx
 *.pdf
+!docs/REPORT.pdf
 uploads/
 output/
 models/

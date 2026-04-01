@@ -1,4 +1,4 @@
-# PDF → Excel (v3.1)
+# PDF → Excel (v3.2)
 
 Extract **tables and structured data from PDFs** into **Excel** and **JSON**. Supports both **digital PDFs** (text-based) and **scanned/image-only PDFs** (via a local vision model). Output is **QB-style**: clean sheet names, one header row per table, merged continuations, and config-driven mapping so you can share the tool and run it on any system.
 
@@ -29,7 +29,16 @@ Extract **tables and structured data from PDFs** into **Excel** and **JSON**. Su
 
 ---
 
-## What’s in v3.1 (achievements)
+## What’s in v3.2
+
+**New in v3.2**
+
+- **Hybrid extraction** (`hybrid_extract.py`): library path first; optional VL for difficult pages. See `docs/HYBRID_ROUTING.md`.
+- **QB-oriented typed fields**: `field_service.py`, `fields_from_qb_output.py`, `qb_posting_rules.py` for structured JSON alongside QB workbooks.
+- **Family template population**: `template_populator.py` (optional account/template workflows).
+- **Docs**: `docs/REPORT.md` and `docs/REPORT.pdf` (bundled), `docs/IMPLEMENTATION_PLAN.md`, baseline/hybrid notes under `docs/`.
+
+**Carried from v3.1**
 
 - **Vision (VL) pipeline** for scanned PDFs: Qwen2.5-VL-7B (GGUF), PyMuPDF for page→image, table-focused prompt, TAB-separated parsing into canonical JSON.
 - **Web app** option “Use vision model (for scanned PDFs)” so the same UI works for both digital and scanned PDFs.
@@ -51,8 +60,9 @@ Extract **tables and structured data from PDFs** into **Excel** and **JSON**. Su
 ## Quick start (run on your system)
 
 ```bash
-# Clone (or download) the repo, then:
-cd pdf-excel-3.0
+# Clone the v3.2 branch, then cd into the repo folder, e.g.:
+# git clone -b v3.2 https://github.com/waqaszahoor1998/pdf-excel.git
+cd pdf-excel
 python -m venv venv
 
 # Windows
