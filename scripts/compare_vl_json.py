@@ -13,6 +13,9 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from decimal import Decimal
+
+from tables_to_excel import _cell_value
 
 
 def load_json(path: Path) -> dict:
@@ -32,7 +35,14 @@ def section_key(sec: dict, index: int) -> str:
     return f"{name}[{index}]"
 
 
-def compare(a_path: Path, b_path: Path, brief: bool = False, verbose: bool = False) -> None:
+def compare(
+    a_path: Path,
+    b_path: Path,
+    brief: bool = False,
+    verbose: bool = False,
+    *,
+    numeric_tol: float = 0.01,
+) -> None:
     a_payload = load_json(a_path)
     b_payload = load_json(b_path)
     a_sections = sections_from_payload(a_payload)
@@ -92,24 +102,59 @@ def compare(a_path: Path, b_path: Path, brief: bool = False, verbose: bool = Fal
         if rc_a != rc_b or cc_a != cc_b:
             print(f"  [{i}] {label}: rows {rc_a} vs {rc_b}, cols {cc_a} vs {cc_b}")
             has_diff = True
-        elif verbose and not brief:
+        else:
+            # Same shape: compute mismatch ratio (ignoring cells that are blank in both).
             rows_a, rows_b = sa["rows"], sb["rows"]
-            if rows_a != rows_b:
-                cell_diffs = []
-                for ri, (ra, rb) in enumerate(zip(rows_a, rows_b)):
-                    if ra != rb:
-                        for ci, (ca, cb) in enumerate(zip(ra, rb)):
-                            if ca != cb:
-                                cell_diffs.append((ri, ci, str(ca)[:30], str(cb)[:30]))
-                                if len(cell_diffs) >= 5:
-                                    break
-                    if len(cell_diffs) >= 5:
-                        break
-                if cell_diffs:
-                    print(f"  [{i}] {label}: same shape, cell diffs (sample):")
-                    for ri, ci, ca, cb in cell_diffs[:5]:
-                        print(f"    row {ri} col {ci}: {repr(ca)} vs {repr(cb)}")
-                    has_diff = True
+
+            tol = Decimal(str(numeric_tol))
+
+            def norm(c):
+                v = _cell_value(c)
+                if v == "":
+                    return None
+                if isinstance(v, (int, float, Decimal)) and not isinstance(v, bool):
+                    return ("num", Decimal(str(v)))
+                return ("str", str(v).strip())
+
+            def eq_cell(a, b) -> bool:
+                na, nb = norm(a), norm(b)
+                if na is None and nb is None:
+                    return True
+                if na is None or nb is None:
+                    return False
+                if na[0] == "num" and nb[0] == "num":
+                    try:
+                        return abs(na[1] - nb[1]) <= tol
+                    except Exception:
+                        return False
+                if na[0] != nb[0]:
+                    return False
+                return na[1] == nb[1]
+
+            compared = 0
+            mismatched = 0
+            sample_diffs: list[tuple[int, int, str, str]] = []
+
+            for ri, (ra, rb) in enumerate(zip(rows_a, rows_b)):
+                for ci, (ca, cb) in enumerate(zip(ra, rb)):
+                    na, nb = norm(ca), norm(cb)
+                    if na is None and nb is None:
+                        continue
+                    compared += 1
+                    if not eq_cell(ca, cb):
+                        mismatched += 1
+                        if verbose and not brief and len(sample_diffs) < 5:
+                            sample_diffs.append((ri, ci, str(ca)[:30], str(cb)[:30]))
+
+            if mismatched:
+                ratio = mismatched / max(1, compared)
+                has_diff = True
+                if not brief:
+                    print(f"  [{i}] {label}: cell mismatches {mismatched}/{compared} (ratio={ratio:.3%})")
+                    if verbose and not brief and sample_diffs:
+                        print(f"  [{i}] {label}: cell diffs (sample):")
+                        for ri, ci, ca, cb in sample_diffs[:5]:
+                            print(f"    row {ri} col {ci}: {repr(ca)} vs {repr(cb)}")
 
     if not has_diff:
         print("Sections: structure and row/column counts match.")
@@ -126,6 +171,7 @@ def main() -> int:
     ap.add_argument("json_b", type=Path, help="Second JSON file")
     ap.add_argument("--brief", action="store_true", help="Only section/row count summary")
     ap.add_argument("--verbose", "-v", action="store_true", help="Show sample cell-level diffs")
+    ap.add_argument("--numeric-tol", type=float, default=0.01, help="Numeric tolerance for cell comparison")
     args = ap.parse_args()
     if not args.json_a.exists():
         print(f"Error: not found: {args.json_a}", file=sys.stderr)
@@ -133,7 +179,7 @@ def main() -> int:
     if not args.json_b.exists():
         print(f"Error: not found: {args.json_b}", file=sys.stderr)
         return 1
-    compare(args.json_a, args.json_b, brief=args.brief, verbose=args.verbose)
+    compare(args.json_a, args.json_b, brief=args.brief, verbose=args.verbose, numeric_tol=args.numeric_tol)
     return 0
 
 

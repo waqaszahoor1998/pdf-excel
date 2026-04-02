@@ -8,9 +8,12 @@ from tables_to_excel import (
     _clean_table_rows,
     _cell_value,
     validate_extraction_json,
+    evaluate_extraction_json_correctness,
     refine_json_sections,
     _json_row_is_narrative_noise,
 )
+
+from pdf_json_audit import _flatten_json_sections, _check_invented
 
 
 class TestMergeFragmentedRow:
@@ -124,3 +127,96 @@ class TestValidateExtractionJson:
         payload = {"sections": [{"headings": [], "rows": []}]}
         with pytest.raises(ValueError, match="Extraction JSON validation|required"):
             validate_extraction_json(payload)
+
+
+class TestEvaluateExtractionJsonCorrectness:
+    def test_good_payload_is_ok(self):
+        payload = {
+            "sections": [
+                {
+                    "name": "S",
+                    "headings": [],
+                    "rows": [
+                        ["", "C1", "C2"],
+                        ["R1", 1, 2],
+                        ["R2", 3, 4],
+                    ],
+                    "row_count": 3,
+                    "column_count": 3,
+                    "column_headers": ["", "C1", "C2"],
+                    "row_headers": ["R1", "R2"],
+                    "data": [
+                        [1, 2, None],
+                        [3, 4, None],
+                    ],
+                }
+            ]
+        }
+        out = evaluate_extraction_json_correctness(payload)
+        assert out["status"] == "ok"
+        assert out["requires_review"] is False
+        assert out["errors"] == []
+
+    def test_row_width_mismatch_is_failed(self):
+        payload = {
+            "sections": [
+                {
+                    "name": "S",
+                    "headings": [],
+                    "rows": [
+                        ["", "C1", "C2"],
+                        ["R1", 1],  # wrong width
+                        ["R2", 3, 4],
+                    ],
+                    "row_count": 3,
+                    "column_count": 3,
+                }
+            ]
+        }
+        out = evaluate_extraction_json_correctness(payload)
+        assert out["status"] == "failed"
+        assert out["requires_review"] is True
+        assert out["errors"]
+
+
+def test_pdf_json_audit_helpers_flatten_and_invented():
+    sections = [
+        {
+            "name": "S",
+            "headings": ["H1"],
+            "rows": [["A", "1,234.56"], ["B", "X"]],
+        }
+    ]
+    flat, cells = _flatten_json_sections(sections)
+    assert "S" in flat
+    assert "H1" in flat
+    assert "1,234.56" in flat
+    # Invented detection: "X" is exempt (synthetic), but "ZZZ" should be flagged.
+    r = _check_invented(["ZZZ", "X"], pdf_raw_flat="... something else ...")
+    assert r["invented_count"] == 1
+
+    def test_grid_cell_mismatch_is_failed(self):
+        payload = {
+            "sections": [
+                {
+                    "name": "S",
+                    "headings": [],
+                    "rows": [
+                        ["", "C1", "C2"],
+                        ["R1", 1, 2],
+                        ["R2", 3, 4],
+                    ],
+                    "row_count": 3,
+                    "column_count": 3,
+                    "column_headers": ["", "C1", "C2"],
+                    "row_headers": ["R1", "R2"],
+                    "data": [
+                        [1, 999, None],  # wrong cell for C2 on R1
+                        [3, 4, None],
+                    ],
+                }
+            ]
+        }
+        out = evaluate_extraction_json_correctness(payload)
+        assert out["status"] == "failed"
+        assert out["errors"]

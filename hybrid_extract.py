@@ -215,6 +215,38 @@ def _suspicious_name_ratio(page_sections: list[tuple]) -> float:
     return bad / len(page_sections)
 
 
+def _page_row_width_mismatch_stats(page_sections: list[tuple]) -> tuple[int, int]:
+    """
+    Lightweight "row/column tally" check for one page.
+
+    For each section, treat the first row as the "header row" (column width).
+    Count mismatches where subsequent rows have a different cell count.
+    Returns (mismatch_count, checked_row_count).
+    """
+    mismatches = 0
+    checked_rows = 0
+    for s in page_sections:
+        rows = s[2] if len(s) >= 3 else None
+        if not rows:
+            continue
+        if not isinstance(rows, list) or len(rows) < 2:
+            continue
+
+        header_row = rows[0]
+        header_cells = header_row if isinstance(header_row, (list, tuple)) else [header_row]
+        header_len = len(header_cells)
+        if header_len <= 0:
+            continue
+
+        for r in rows[1:]:
+            row_cells = r if isinstance(r, (list, tuple)) else [r]
+            checked_rows += 1
+            if len(row_cells) != header_len:
+                mismatches += 1
+
+    return mismatches, checked_rows
+
+
 def detect_bad_pages(sections: list[tuple], quality_threshold: float = 0.72) -> tuple[list[int], dict[int, dict]]:
     """
     Decide which pages need VL re-extraction. A page is "bad" if it has no section
@@ -238,13 +270,21 @@ def detect_bad_pages(sections: list[tuple], quality_threshold: float = 0.72) -> 
             or ("suspicious_section_names" in reasons and "weak_structure" in reasons)
             or ("null_heavy" in reasons and "weak_structure" in reasons)
         )
-        route_to_vl = (not has_table) or (quality_score < quality_threshold) or severe_combo
+        # Cheap correctness proxy: if the table matrix is shape-consistent,
+        # avoid routing to VL purely due to heuristic quality score.
+        row_mis, row_checked = _page_row_width_mismatch_stats(page_sections)
+        shape_ok = row_checked > 0 and row_mis == 0
+
+        route_to_vl = (not has_table) or severe_combo or (quality_score < quality_threshold and not shape_ok)
         diagnostics[page_num] = {
             "quality_score": quality_score,
             "has_table_like_section": bool(has_table),
             "route_to_vl": bool(route_to_vl),
             "severe_combo": bool(severe_combo),
             "reasons": reasons,
+            "row_width_mismatch": row_mis,
+            "row_width_checked_rows": row_checked,
+            "shape_ok": bool(shape_ok),
         }
         if route_to_vl:
             bad.append(page_num)
@@ -379,6 +419,13 @@ def hybrid_pdf_to_json(
         lib_susp_ratio = _suspicious_name_ratio(lib_page_sections)
         vl_susp_ratio = _suspicious_name_ratio(vl_page_sections)
 
+        # Lightweight correctness proxy: row-width consistency on extracted table matrices.
+        # Prefer the side that produces consistent row shapes.
+        lib_mis, lib_checked = _page_row_width_mismatch_stats(lib_page_sections)
+        vl_mis, vl_checked = _page_row_width_mismatch_stats(vl_page_sections)
+        lib_shape_ok = lib_checked > 0 and lib_mis == 0
+        vl_shape_ok = vl_checked > 0 and vl_mis == 0
+
         # Keep library if it's clearly better on this routed page.
         # Guardrail: if library names are mostly suspicious but VL names are cleaner,
         # prefer VL even when lib_q is numerically close.
@@ -389,6 +436,17 @@ def hybrid_pdf_to_json(
             and lib_q > vl_q + 0.08
             and not (library_names_look_bad and vl_names_look_cleaner)
         )
+
+        # Correctness override:
+        # If one side's table matrix is inconsistent (row width mismatches),
+        # prefer the consistent side even if "quality scores" are close.
+        if not use_library:
+            if lib_shape_ok and not vl_shape_ok:
+                use_library = True
+        else:
+            if vl_shape_ok and not lib_shape_ok:
+                use_library = False
+
         if use_library:
             selected_source_by_page[page_num] = "library_fallback"
             fallback_pages.append(page_num)
@@ -400,6 +458,10 @@ def hybrid_pdf_to_json(
             "vl_quality": vl_q,
             "library_suspicious_name_ratio": round(lib_susp_ratio, 4),
             "vl_suspicious_name_ratio": round(vl_susp_ratio, 4),
+            "library_row_width_mismatch": lib_mis,
+            "library_row_width_checked_rows": lib_checked,
+            "vl_row_width_mismatch": vl_mis,
+            "vl_row_width_checked_rows": vl_checked,
             "selected": selected_source_by_page[page_num],
         }
 
@@ -424,6 +486,21 @@ def hybrid_pdf_to_json(
     merged.sort(key=sort_key)
 
     payload = {"sections": refine_json_sections(merged), "meta": meta}
+    try:
+        from tables_to_excel import evaluate_extraction_json_correctness
+
+        evaluation = evaluate_extraction_json_correctness(payload)
+        payload["meta"].update(
+            {
+                "status": evaluation.get("status"),
+                "requires_review": evaluation.get("requires_review"),
+                "quality_score": evaluation.get("quality_score"),
+                "validation_errors": evaluation.get("errors"),
+                "validation_warnings": evaluation.get("warnings"),
+            }
+        )
+    except Exception as e:
+        log.warning("validation skipped in hybrid_pdf_to_json: %s", e)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
     log.info(

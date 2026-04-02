@@ -6,11 +6,15 @@ Run: flask --app app run
 Or:  python app.py
 
 Then open http://127.0.0.1:5000 — upload a PDF, get all tables as Excel.
-Extraction: default uses pdfplumber (digital PDFs). If "Use vision model" is checked,
-uses local Qwen2.5-VL for scanned/image-only PDFs (model must be installed). No raw data is sent to any cloud service.
+Extraction: default uses pdfplumber + QB shaping. Choose hybrid (library + VL on
+difficult pages) or vision-only for scans; optional Ask AI uses Anthropic. After
+extraction, the first pages are audited vs the PDF; summary is in JSON meta and
+the ZIP may include a full audit report. No raw data is sent to any cloud service
+except Ask AI when that mode is used.
 """
 
 import io
+import json
 import logging
 import os
 import tempfile
@@ -41,6 +45,7 @@ from tables_to_excel import (
     _normalize_page_to_sheet,
 )
 from pdf_to_qb import pdf_to_qb_excel, transform_extracted_to_qb
+from pdf_json_audit import apply_audit_to_extraction_file
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-in-production")
@@ -51,6 +56,10 @@ _val = (os.environ.get("MAX_UPLOAD_MB") or "").strip() or "40"
 _default_mb = max(1, min(100, int(_val) if _val.isdigit() else 40))
 MAX_CONTENT_LENGTH = _default_mb * 1024 * 1024
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
+
+# Web UI: cap VL/hybrid page count and audit depth (matches CLI defaults)
+WEB_MAX_VL_PAGES = 20
+WEB_AUDIT_PAGES = 3
 
 
 def _get_upload_limit_mb():
@@ -69,6 +78,39 @@ def _vl_available():
         return model_path and Path(model_path).exists() and mmproj_path and Path(mmproj_path).exists()
     except Exception:
         return False
+
+
+def _extract_method_from_form(form) -> str:
+    """library | hybrid | vl — default library."""
+    m = (form.get("extract_method") or "").strip().lower()
+    if m in ("library", "hybrid", "vl"):
+        return m
+    return "vl" if (form.get("use_vl") or "").strip().lower() in ("on", "1", "yes", "true") else "library"
+
+
+def _flash_audit_summary(json_path: Path) -> None:
+    """Flash a short message from meta.audit_summary after apply_audit_to_extraction_file."""
+    try:
+        payload = json.loads(json_path.read_text(encoding="utf-8"))
+        meta = payload.get("meta") or {}
+        aud = meta.get("audit_summary") or {}
+        if int(aud.get("pages_audited") or 0) == 0:
+            return
+        if aud.get("passed"):
+            flash(
+                "Audit: first pages match the PDF (numeric coverage and invented-value checks).",
+                "success",
+            )
+        else:
+            flash(
+                "Audit: review suggested — "
+                f"numeric gaps on {int(aud.get('pages_with_numeric_gaps') or 0)} page(s), "
+                f"invented-value flags on {int(aud.get('pages_with_invented_values') or 0)} page(s), "
+                f"content without sections on {int(aud.get('pages_no_sections_but_content') or 0)} page(s).",
+                "warning",
+            )
+    except Exception:
+        pass
 
 
 @app.errorhandler(RequestEntityTooLarge)
@@ -124,20 +166,31 @@ def extract():
 
         out_path = Path(tmp_dir) / "output.xlsx"
         json_path = Path(tmp_dir) / "output.json"
-        use_vl = (request.form.get("use_vl") or "").strip().lower() in ("on", "1", "yes", "true")
+        audit_report_path = Path(tmp_dir) / "audit_report.json"
+        extract_method = _extract_method_from_form(request.form)
         if use_ai:
             from config import load_config
             from extract import extract_pdf_to_excel
             cfg = load_config()
             result = extract_pdf_to_excel(str(pdf_path), query, str(out_path), config=cfg)
             json_path = None  # AI path does not produce JSON in same format
-        elif use_vl:
-            # Vision model path: PDF → VL → JSON → Excel (for scanned PDFs)
+            audit_report_path = None
+        elif extract_method in ("hybrid", "vl") and not _vl_available():
+            flash(
+                "Hybrid and vision-only extraction need the local vision model. "
+                "Install requirements-vl.txt and run scripts/download_qwen2vl.py.",
+            )
+            return redirect(url_for("index"))
+        elif extract_method == "hybrid":
             try:
-                from extract_vl import pdf_to_json_vl
-                vl_max_pages = 20  # limit for web to avoid long waits
-                json_path = Path(tmp_dir) / "output.json"
-                pdf_to_json_vl(str(pdf_path), str(json_path), max_pages=vl_max_pages)
+                from hybrid_extract import hybrid_pdf_to_json
+
+                hybrid_pdf_to_json(
+                    str(pdf_path),
+                    str(json_path),
+                    max_pages=WEB_MAX_VL_PAGES,
+                    overwrite=True,
+                )
                 sections = load_sections_from_json(json_path)
                 with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
                     temp_xlsx = f.name
@@ -147,11 +200,38 @@ def extract():
                 finally:
                     Path(temp_xlsx).unlink(missing_ok=True)
                 result = str(out_path)
-            except ImportError as e:
+            except ImportError:
+                log.exception("Hybrid extract: import failed")
+                flash("Hybrid extraction requires the vision stack (requirements-vl.txt).")
+                return redirect(url_for("index"))
+            except FileNotFoundError:
+                log.exception("Hybrid extract: model or file not found")
+                flash("Vision model files not found. Run scripts/download_qwen2vl.py to download the model.")
+                return redirect(url_for("index"))
+            except Exception as e:
+                log.exception("Hybrid extract: %s", e)
+                flash(f"Hybrid extraction failed: {e}")
+                return redirect(url_for("index"))
+        elif extract_method == "vl":
+            # Vision model path: PDF → VL → JSON → Excel (for scanned PDFs)
+            try:
+                from extract_vl import pdf_to_json_vl
+
+                pdf_to_json_vl(str(pdf_path), str(json_path), max_pages=WEB_MAX_VL_PAGES)
+                sections = load_sections_from_json(json_path)
+                with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+                    temp_xlsx = f.name
+                try:
+                    _write_sections_to_workbook(sections, Path(temp_xlsx))
+                    transform_extracted_to_qb(temp_xlsx, str(out_path))
+                finally:
+                    Path(temp_xlsx).unlink(missing_ok=True)
+                result = str(out_path)
+            except ImportError:
                 log.exception("VL extract: import failed")
                 flash("Vision model not available. Install requirements-vl.txt and run scripts/download_qwen2vl.py.")
                 return redirect(url_for("index"))
-            except FileNotFoundError as e:
+            except FileNotFoundError:
                 log.exception("VL extract: model or file not found")
                 flash("Vision model files not found. Run scripts/download_qwen2vl.py to download the model.")
                 return redirect(url_for("index"))
@@ -164,6 +244,16 @@ def extract():
                 str(pdf_path), str(out_path), overwrite=True, json_path_out=str(json_path)
             )
 
+        if json_path and json_path.exists() and not use_ai:
+            apply_audit_to_extraction_file(
+                pdf_path,
+                json_path,
+                audit_pages=WEB_AUDIT_PAGES,
+                report_path=audit_report_path,
+                silent=True,
+            )
+            _flash_audit_summary(json_path)
+
         if not Path(result).exists():
             log.error("extract: result file missing %s", result)
             flash("Conversion produced no file.")
@@ -175,6 +265,8 @@ def extract():
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
                 zf.write(result, f"{base_name}.xlsx")
                 zf.write(json_path, f"{base_name}.json")
+                if audit_report_path and audit_report_path.exists():
+                    zf.write(audit_report_path, f"{base_name}_audit_report.json")
             buf.seek(0)
             log.info("extract: sending zip with %s.xlsx and %s.json", base_name, base_name)
             return send_file(
@@ -215,7 +307,7 @@ def extract():
 
 @app.route("/pdf-to-json", methods=["POST"])
 def pdf_to_json_route():
-    """Step 1: PDF → JSON only. Download the JSON so you can edit it, then use JSON → Excel."""
+    """Step 1: PDF → JSON only. Download JSON (meta includes audit summary on sampled pages)."""
     if "pdf" not in request.files:
         flash("No file selected.")
         return redirect(url_for("index"))
@@ -226,24 +318,59 @@ def pdf_to_json_route():
     if not file.filename.lower().endswith(".pdf"):
         flash("Please upload a PDF file.")
         return redirect(url_for("index"))
+    extract_method = _extract_method_from_form(request.form)
+    if extract_method in ("hybrid", "vl") and not _vl_available():
+        flash(
+            "Hybrid and vision-only need the local vision model. "
+            "Install requirements-vl.txt and run scripts/download_qwen2vl.py.",
+        )
+        return redirect(url_for("index"))
     tmp_dir = None
     try:
         tmp_dir = tempfile.mkdtemp()
         pdf_path = Path(tmp_dir) / "upload.pdf"
         file.save(str(pdf_path))
         json_path = Path(tmp_dir) / "output.json"
-        sections = extract_sections_from_pdf(str(pdf_path))
-        _write_json_from_sections(sections, json_path, overwrite=True)
+        audit_report_path = Path(tmp_dir) / "audit_report.json"
+        if extract_method == "hybrid":
+            from hybrid_extract import hybrid_pdf_to_json
+
+            hybrid_pdf_to_json(
+                str(pdf_path),
+                str(json_path),
+                max_pages=WEB_MAX_VL_PAGES,
+                overwrite=True,
+            )
+        elif extract_method == "vl":
+            from extract_vl import pdf_to_json_vl
+
+            pdf_to_json_vl(str(pdf_path), str(json_path), max_pages=WEB_MAX_VL_PAGES)
+        else:
+            sections = extract_sections_from_pdf(str(pdf_path))
+            _write_json_from_sections(sections, json_path, overwrite=True)
         if not json_path.exists():
             flash("Conversion produced no JSON.")
             return redirect(url_for("index"))
+        apply_audit_to_extraction_file(
+            pdf_path,
+            json_path,
+            audit_pages=WEB_AUDIT_PAGES,
+            report_path=audit_report_path,
+            silent=True,
+        )
+        _flash_audit_summary(json_path)
         base_name = Path(file.filename).stem
-        download_name = f"{base_name}.json"
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.write(json_path, f"{base_name}.json")
+            if audit_report_path.exists():
+                zf.write(audit_report_path, f"{base_name}_audit_report.json")
+        buf.seek(0)
         return send_file(
-            str(json_path),
+            buf,
             as_attachment=True,
-            download_name=download_name,
-            mimetype="application/json",
+            download_name=f"{base_name}_json.zip",
+            mimetype="application/zip",
         )
     except Exception as e:
         log.exception("pdf-to-json: %s", e)

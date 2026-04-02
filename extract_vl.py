@@ -993,6 +993,24 @@ def pdf_to_json_vl(
         "sections": sections,
         "meta": meta_out,
     }
+    try:
+        # Deep validate JSON shape/correctness so downstream can reliably decide
+        # whether to ask for review or proceed unattended.
+        from tables_to_excel import evaluate_extraction_json_correctness
+
+        evaluation = evaluate_extraction_json_correctness(payload)
+        payload["meta"].update(
+            {
+                "status": evaluation.get("status"),
+                "requires_review": evaluation.get("requires_review"),
+                "quality_score": evaluation.get("quality_score"),
+                "validation_errors": evaluation.get("errors"),
+                "validation_warnings": evaluation.get("warnings"),
+            }
+        )
+    except Exception as e:
+        # Validation must never break extraction output; just omit validation meta.
+        log.warning("validation skipped in pdf_to_json_vl: %s", e)
     with open(out, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
     log.info("Wrote %d section(s) to %s", len(sections), out)

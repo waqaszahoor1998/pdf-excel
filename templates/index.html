@@ -143,6 +143,7 @@
     }
     .flash.error { background: rgba(248, 81, 73, 0.15); color: var(--error); border: 1px solid rgba(248, 81, 73, 0.3); }
     .flash.success { background: rgba(63, 185, 80, 0.15); color: var(--success); border: 1px solid rgba(63, 185, 80, 0.3); }
+    .flash.warning { background: rgba(210, 153, 34, 0.12); color: #d29922; border: 1px solid rgba(210, 153, 34, 0.35); }
     .limit { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.35rem; }
   </style>
 </head>
@@ -161,11 +162,11 @@
       {% endif %}
     {% endwith %}
 
-    <form action="{{ url_for('extract') }}" method="post" enctype="multipart/form-data" class="card">
+    <form id="extractForm" action="{{ url_for('extract') }}" method="post" enctype="multipart/form-data" class="card">
       <div class="form-group">
         <label for="pdf">PDF file</label>
         <input type="file" name="pdf" id="pdf" accept=".pdf" required>
-        <p class="limit">Max {{ max_mb }} MB. Text-based PDFs only (no scanned/image-only).</p>
+        <p class="limit" id="pdfLimitHint">Max {{ max_mb }} MB. Library-only mode works best on text-based PDFs; hybrid or vision can handle scans (slower).</p>
         <p class="choose-another" id="chooseAnotherWrap" style="display: none; margin-top: 0.5rem;">
           <button type="button" class="link-btn" id="chooseAnotherBtn">Choose another file</button>
         </p>
@@ -186,13 +187,24 @@
         </div>
       </div>
 
-      <div class="form-group" id="useVlGroup">
-        <label class="radio-label">
-          <input type="checkbox" name="use_vl" id="useVl" value="on">
-          Use vision model (for scanned PDFs) — uses Qwen2.5-VL to read tables from image-only pages; slower, needs model installed.
-        </label>
+      <div class="form-group" id="extractMethodGroup">
+        <label>Extraction (offline)</label>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" name="extract_method" value="library" id="emLibrary" checked>
+            Library + QB — pdfplumber tables, QuickBooks-style Excel. Fast; best for digital PDFs.
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="extract_method" value="hybrid" id="emHybrid" {% if not vl_available %}disabled{% endif %}>
+            Hybrid — library first; local vision (Qwen2.5-VL) on pages that look wrong. {% if not vl_available %}<span class="query-hint">(install VL to enable)</span>{% endif %}
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="extract_method" value="vl" id="emVl" {% if not vl_available %}disabled{% endif %}>
+            Vision only — every page through the vision model (slow). {% if not vl_available %}<span class="query-hint">(install VL to enable)</span>{% endif %}
+          </label>
+        </div>
         {% if not vl_available %}
-        <p class="query-hint">Vision model not detected. Install requirements-vl.txt and run scripts/download_qwen2vl.py to enable.</p>
+        <p class="query-hint">Vision model not detected. Install requirements-vl.txt and run scripts/download_qwen2vl.py for hybrid or vision-only.</p>
         {% endif %}
       </div>
 
@@ -202,10 +214,40 @@
         <p class="query-hint">The PDF is sent to Anthropic (Claude) to extract only what you ask for.</p>
       </div>
 
-      <p class="query-hint" id="offlineHint" style="margin-bottom: 0.5rem;">Structured output: one sheet per section, merged summaries, and per-account sheets. You get a ZIP with both the Excel file and the JSON (canonical extraction) so you can use the JSON for other formats later.</p>
+      <p class="query-hint" id="offlineHint" style="margin-bottom: 0.5rem;">Structured output: one sheet per section, merged summaries, and per-account sheets. Download is a ZIP with Excel, canonical JSON, and (when audit runs) a PDF-vs-JSON audit file. Flash messages summarize audit on the first few pages.</p>
 
       <div class="form-group" style="margin-top: 1.25rem;">
         <button type="submit" class="btn btn-primary" id="submitBtn">Extract to Excel</button>
+      </div>
+    </form>
+
+    <form action="{{ url_for('pdf_to_json_route') }}" method="post" enctype="multipart/form-data" class="card" id="pdfToJsonForm">
+      <h2 style="font-size: 1.1rem; margin: 0 0 1rem 0; font-weight: 600;">PDF → JSON only</h2>
+      <p class="query-hint" style="margin-top: 0; margin-bottom: 1rem;">Get extraction JSON (and optional full audit JSON) without building Excel. Download is a ZIP.</p>
+      <div class="form-group">
+        <label for="pdfJson">PDF file</label>
+        <input type="file" name="pdf" id="pdfJson" accept=".pdf" required>
+        <p class="limit" id="pdfJsonLimitHint">Max {{ max_mb }} MB.</p>
+      </div>
+      <div class="form-group">
+        <label>Extraction</label>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" name="extract_method" value="library" id="emjLibrary" checked>
+            Library — pdfplumber sections to JSON.
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="extract_method" value="hybrid" id="emjHybrid" {% if not vl_available %}disabled{% endif %}>
+            Hybrid {% if not vl_available %}(requires VL){% endif %}
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="extract_method" value="vl" id="emjVl" {% if not vl_available %}disabled{% endif %}>
+            Vision only {% if not vl_available %}(requires VL){% endif %}
+          </label>
+        </div>
+      </div>
+      <div class="form-group">
+        <button type="submit" class="btn btn-primary" id="pdfJsonSubmit">Download JSON (ZIP)</button>
       </div>
     </form>
 
@@ -213,11 +255,13 @@
 
   <script>
     (function() {
-      var form = document.querySelector('form');
+      var form = document.getElementById('extractForm');
       var fileInput = document.getElementById('pdf');
       var submitBtn = document.getElementById('submitBtn');
       var chooseAnotherWrap = document.getElementById('chooseAnotherWrap');
       var chooseAnotherBtn = document.getElementById('chooseAnotherBtn');
+      var pdfLimitHint = document.getElementById('pdfLimitHint');
+      var pdfJsonLimitHint = document.getElementById('pdfJsonLimitHint');
 
       function updateFileUI() {
         var hasFile = fileInput.files && fileInput.files.length > 0;
@@ -238,12 +282,43 @@
       var queryInput = document.getElementById('query');
       var offlineHint = document.getElementById('offlineHint');
 
-      var useVlGroup = document.getElementById('useVlGroup');
+      var extractMethodGroup = document.getElementById('extractMethodGroup');
+      function syncLimitHints() {
+        function useVision(lib, hybrid, vl) {
+          return (hybrid && hybrid.checked) || (vl && vl.checked);
+        }
+        var maxMb = {{ max_mb | tojson }};
+        var base = 'Max ' + maxMb + ' MB.';
+        if (pdfLimitHint) {
+          pdfLimitHint.textContent = base + (useVision(
+            document.getElementById('emLibrary'),
+            document.getElementById('emHybrid'),
+            document.getElementById('emVl')
+          )
+            ? ' Hybrid or vision may read scanned/image pages (slower, needs local model).'
+            : ' Library-only works best on text-based PDFs.');
+        }
+        if (pdfJsonLimitHint) {
+          pdfJsonLimitHint.textContent = base + (useVision(
+            document.getElementById('emjLibrary'),
+            document.getElementById('emjHybrid'),
+            document.getElementById('emjVl')
+          )
+            ? ' Hybrid/VL enabled for this download.'
+            : ' Library extraction.');
+        }
+      }
+      ['emLibrary', 'emHybrid', 'emVl', 'emjLibrary', 'emjHybrid', 'emjVl'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('change', syncLimitHints);
+      });
+      syncLimitHints();
+
       function updateModeUI() {
         var isAi = modeAi && modeAi.checked;
         if (queryGroup) queryGroup.style.display = isAi ? 'block' : 'none';
         if (offlineHint) offlineHint.style.display = isAi ? 'none' : 'block';
-        if (useVlGroup) useVlGroup.style.display = isAi ? 'none' : 'block';
+        if (extractMethodGroup) extractMethodGroup.style.display = isAi ? 'none' : 'block';
         if (queryInput) queryInput.required = isAi;
       }
       if (modeOffline) modeOffline.addEventListener('change', updateModeUI);
@@ -254,6 +329,15 @@
         submitBtn.disabled = true;
         submitBtn.textContent = document.getElementById('modeAi').checked ? 'Calling API…' : 'Extracting…';
       });
+
+      var pdfJsonForm = document.getElementById('pdfToJsonForm');
+      var pdfJsonSubmit = document.getElementById('pdfJsonSubmit');
+      if (pdfJsonForm && pdfJsonSubmit) {
+        pdfJsonForm.addEventListener('submit', function() {
+          pdfJsonSubmit.disabled = true;
+          pdfJsonSubmit.textContent = 'Extracting…';
+        });
+      }
     })();
   </script>
 </body>

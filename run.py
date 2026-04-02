@@ -27,6 +27,7 @@ from extract import extract_pdf_to_excel
 from pdf_to_qb import pdf_to_qb_excel, transform_extracted_to_qb
 from template_populator import populate_template_from_fields_json, populate_template_from_qb_output
 from fields_from_qb_output import extract_fields
+from pdf_json_audit import audit_pdf_vs_extraction_json, apply_audit_to_extraction_file
 
 
 def _expand_pdfs(paths):
@@ -86,6 +87,18 @@ def cmd_tables(args) -> int:
             print(f"Saved: {result}")
             if out_path.with_suffix(".json").exists():
                 print(f"Saved: {out_path.with_suffix('.json')}")
+                if not getattr(args, "no_audit", False):
+                    _, ok = apply_audit_to_extraction_file(
+                        Path(pdf),
+                        out_path.with_suffix(".json"),
+                        audit_pages=getattr(args, "audit_pages", None),
+                        strict=getattr(args, "audit_strict", False),
+                        report_path=Path(getattr(args, "audit_report", "")).expanduser()
+                        if getattr(args, "audit_report", None)
+                        else None,
+                    )
+                    if getattr(args, "audit_strict", False) and not ok:
+                        return 2
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
@@ -210,6 +223,18 @@ def cmd_hybrid(args) -> int:
                 overwrite=not args.no_overwrite,
             )
             print(f"Saved: {result}")
+            if not getattr(args, "no_audit", False):
+                _, ok = apply_audit_to_extraction_file(
+                    Path(pdf),
+                    Path(result),
+                    audit_pages=getattr(args, "audit_pages", None),
+                    strict=getattr(args, "audit_strict", False),
+                    report_path=Path(getattr(args, "audit_report", "")).expanduser()
+                    if getattr(args, "audit_report", None)
+                    else None,
+                )
+                if getattr(args, "audit_strict", False) and not ok:
+                    return 2
             if getattr(args, "excel", False):
                 import tempfile
                 from tables_to_excel import (
@@ -262,9 +287,64 @@ def cmd_json(args) -> int:
         try:
             result = pdf_to_json(str(pdf), out, overwrite=not args.no_overwrite)
             print(f"Saved: {result}")
+            if not getattr(args, "no_audit", False):
+                _, ok = apply_audit_to_extraction_file(
+                    Path(pdf),
+                    Path(result),
+                    audit_pages=getattr(args, "audit_pages", None),
+                    strict=getattr(args, "audit_strict", False),
+                    report_path=Path(getattr(args, "audit_report", "")).expanduser()
+                    if getattr(args, "audit_report", None)
+                    else None,
+                )
+                if getattr(args, "audit_strict", False) and not ok:
+                    return 2
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
+    return 0
+
+
+def cmd_audit_json(args) -> int:
+    """
+    Audit a canonical extraction JSON against its source PDF.
+    Writes a report JSON (or prints to stdout) with numeric/text gaps, structural issues, invented values.
+    """
+    import json
+
+    pdf_path = Path(args.pdf)
+    json_path = Path(args.json_file)
+    if not pdf_path.exists():
+        print(f"Error: PDF not found: {pdf_path}", file=sys.stderr)
+        return 1
+    if not json_path.exists():
+        print(f"Error: JSON not found: {json_path}", file=sys.stderr)
+        return 1
+
+    report = audit_pdf_vs_extraction_json(
+        pdf_path,
+        json_path,
+        max_pages=getattr(args, "max_pages", None),
+    )
+
+    s = report.get("summary") or {}
+    print(f"\nAudit: {pdf_path}", file=sys.stderr)
+    print(f"  Pages audited            : {s.get('pages_audited')}", file=sys.stderr)
+    print(f"  Numeric gaps             : {s.get('pages_with_numeric_gaps')}", file=sys.stderr)
+    print(f"  Text gaps                : {s.get('pages_with_text_gaps')}", file=sys.stderr)
+    print(f"  Structural issues        : {s.get('pages_with_structural_issues')}", file=sys.stderr)
+    print(f"  Invented values          : {s.get('pages_with_invented_values')}", file=sys.stderr)
+    print(f"  No sections (has content): {s.get('pages_no_sections_but_content')}", file=sys.stderr)
+
+    out = getattr(args, "output", None)
+    if out:
+        out_path = Path(out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"\nFull report written to {out}", file=sys.stderr)
+        return 0
+
+    print(json.dumps(report, indent=2, ensure_ascii=False))
     return 0
 
 
@@ -443,6 +523,10 @@ def main() -> int:
     p_tables.add_argument("pdfs", nargs="+", help="PDF file(s) or directory containing PDFs")
     p_tables.add_argument("-o", "--output", default=None, help="Output .xlsx path (single PDF only)")
     p_tables.add_argument("--no-overwrite", action="store_true", help="Do not overwrite existing output")
+    p_tables.add_argument("--no-audit", action="store_true", help="Skip PDF-vs-JSON audit step (not recommended)")
+    p_tables.add_argument("--audit-pages", type=int, default=3, help="Audit only first N pages (default 3; set 0 to disable)")
+    p_tables.add_argument("--audit-strict", action="store_true", help="Fail command (exit 2) when audit requires review")
+    p_tables.add_argument("--audit-report", default=None, help="Optional path to write full audit report JSON")
     p_tables.set_defaults(func=cmd_tables)
 
     p_hybrid = sub.add_parser("hybrid", help="Extract PDF with hybrid (library + VL on bad pages); writes JSON with per-page VL timing in meta")
@@ -452,13 +536,28 @@ def main() -> int:
     p_hybrid.add_argument("--max-pages", type=int, default=None, help="Max pages to process (default: all)")
     p_hybrid.add_argument("--no-overwrite", action="store_true", help="Do not overwrite existing output")
     p_hybrid.add_argument("--excel", action="store_true", help="Also convert the JSON to Excel (same path with .xlsx)")
+    p_hybrid.add_argument("--no-audit", action="store_true", help="Skip PDF-vs-JSON audit step (not recommended)")
+    p_hybrid.add_argument("--audit-pages", type=int, default=3, help="Audit only first N pages (default 3; set 0 to disable)")
+    p_hybrid.add_argument("--audit-strict", action="store_true", help="Fail command (exit 2) when audit requires review")
+    p_hybrid.add_argument("--audit-report", default=None, help="Optional path to write full audit report JSON")
     p_hybrid.set_defaults(func=cmd_hybrid)
 
     p_json = sub.add_parser("json", help="Extract PDF to JSON (sections + rows); easy to edit, then convert to Excel")
     p_json.add_argument("pdfs", nargs="+", help="PDF file(s) or directory containing PDFs")
     p_json.add_argument("-o", "--output", default=None, help="Output .json path (single PDF only)")
     p_json.add_argument("--no-overwrite", action="store_true", help="Do not overwrite existing output")
+    p_json.add_argument("--no-audit", action="store_true", help="Skip PDF-vs-JSON audit step (not recommended)")
+    p_json.add_argument("--audit-pages", type=int, default=3, help="Audit only first N pages (default 3; set 0 to disable)")
+    p_json.add_argument("--audit-strict", action="store_true", help="Fail command (exit 2) when audit requires review")
+    p_json.add_argument("--audit-report", default=None, help="Optional path to write full audit report JSON")
     p_json.set_defaults(func=cmd_json)
+
+    p_audit = sub.add_parser("audit-json", help="Audit extraction JSON against its source PDF (numeric/text gaps, invented values)")
+    p_audit.add_argument("pdf", help="Path to the source PDF")
+    p_audit.add_argument("json_file", help="Path to extraction JSON (our canonical sections/rows format)")
+    p_audit.add_argument("-o", "--output", default=None, help="Write report JSON to this path (optional)")
+    p_audit.add_argument("--max-pages", type=int, default=None, help="Limit audit to first N pages (optional)")
+    p_audit.set_defaults(func=cmd_audit_json)
 
     p_from_json = sub.add_parser("from-json", help="Convert JSON (from pdf→json) to Excel; use after editing JSON to map tables")
     p_from_json.add_argument("json_file", help="Path to .json file (extraction output)")

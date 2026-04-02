@@ -1557,8 +1557,21 @@ def _write_json_from_sections(
     payload_sections = _sections_to_json_serializable(sections)
     payload_sections = refine_json_sections(payload_sections)
     payload = {"sections": payload_sections}
-    if meta:
-        payload["meta"] = meta
+    payload["meta"] = meta if isinstance(meta, dict) else {}
+    try:
+        evaluation = evaluate_extraction_json_correctness(payload)
+        payload["meta"].update(
+            {
+                "status": evaluation.get("status"),
+                "requires_review": evaluation.get("requires_review"),
+                "quality_score": evaluation.get("quality_score"),
+                "validation_errors": evaluation.get("errors"),
+                "validation_warnings": evaluation.get("warnings"),
+            }
+        )
+    except Exception:
+        # Validation meta must never break JSON writing.
+        pass
     with open(out, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
     log.info("Wrote %d section(s) to %s", len(sections), out)
@@ -1608,6 +1621,242 @@ def validate_extraction_json(payload: dict) -> None:
         jsonschema.validate(instance=payload, schema=_EXTRACTION_JSON_SCHEMA)
     except jsonschema.ValidationError as e:
         raise ValueError(f"Extraction JSON validation failed: {e}") from e
+
+
+def evaluate_extraction_json_correctness(
+    payload: dict,
+    *,
+    numeric_tol: float = 0.01,
+) -> dict:
+    """
+    Deep correctness validator for extraction JSON.
+
+    This is stricter than schema validation:
+    - checks row/column "tally" consistency (all rows match header-row width)
+    - checks `row_count`/`column_count` if present
+    - if the optional header-grid is present (`column_headers`, `row_headers`, `data`),
+      verifies its dimensions and that it matches the `rows` matrix by (row_index, col_index)
+
+    Returns dict with:
+      - status: "ok" | "requires_review" | "failed"
+      - requires_review: bool
+      - quality_score: float in [0, 1]
+      - errors: list[str]
+      - warnings: list[str]
+    """
+
+    def _cell_normalize_for_compare(c):
+        # Normalize using existing project logic so numeric strings and numeric types
+        # compare consistently across different pipelines.
+        v = _cell_value(c)
+        if v == "":
+            return None
+        if isinstance(v, (int, float, Decimal)) and not isinstance(v, bool):
+            return ("num", Decimal(str(v)))
+        return ("str", str(v).strip())
+
+    def _cells_equal(a, b) -> bool:
+        na = _cell_normalize_for_compare(a)
+        nb = _cell_normalize_for_compare(b)
+        if na is None and nb is None:
+            return True
+        if na is None or nb is None:
+            return False
+        if na[0] == "num" and nb[0] == "num":
+            try:
+                diff = abs(na[1] - nb[1])
+                return diff <= Decimal(str(numeric_tol))
+            except Exception:
+                return False
+        if na[0] != nb[0]:
+            return False
+        return na[1] == nb[1]
+
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if not isinstance(payload, dict):
+        return {
+            "status": "failed",
+            "requires_review": True,
+            "quality_score": 0.0,
+            "errors": ["payload is not a dict"],
+            "warnings": [],
+        }
+
+    sections = payload.get("sections")
+    if not isinstance(sections, list):
+        return {
+            "status": "failed",
+            "requires_review": True,
+            "quality_score": 0.0,
+            "errors": ["payload.sections missing or not a list"],
+            "warnings": [],
+        }
+
+    if not sections:
+        warnings.append("no sections found in payload")
+
+    for sec in sections:
+        if not isinstance(sec, dict):
+            errors.append("section is not an object/dict")
+            continue
+
+        sec_name = str(sec.get("name") or "")
+        rows = sec.get("rows")
+        if not isinstance(rows, list):
+            errors.append(f"section={sec_name[:60]!r}: rows missing or not a list")
+            continue
+
+        row_count_actual = len(rows)
+        if row_count_actual == 0:
+            # Not necessarily wrong (some documents have empty sections),
+            # but flag for review.
+            warnings.append(f"section={sec_name[:60]!r}: empty rows")
+            # Still check row_count/column_count if present.
+            rc = sec.get("row_count")
+            cc = sec.get("column_count")
+            if rc is not None and isinstance(rc, int) and rc != 0:
+                errors.append(f"section={sec_name[:60]!r}: row_count={rc} != 0")
+            if cc is not None and isinstance(cc, int) and cc != 0:
+                errors.append(f"section={sec_name[:60]!r}: column_count={cc} != 0")
+            continue
+
+        # Header row width is the canonical column width.
+        header_row = rows[0]
+        header_len = len(header_row) if isinstance(header_row, list) else 0
+        if header_len <= 0:
+            errors.append(f"section={sec_name[:60]!r}: header row invalid/empty")
+            continue
+
+        # Verify `rows` are lists and have consistent width.
+        for i, r in enumerate(rows):
+            if not isinstance(r, list):
+                errors.append(f"section={sec_name[:60]!r}: row_index={i} is not a list")
+                continue
+            if len(r) != header_len:
+                errors.append(
+                    f"section={sec_name[:60]!r} row_index={i}: row_len={len(r)} != header_len={header_len}"
+                )
+
+        # Verify row_count/column_count fields when present.
+        if "row_count" in sec and isinstance(sec.get("row_count"), int):
+            if sec["row_count"] != row_count_actual:
+                errors.append(f"section={sec_name[:60]!r}: row_count={sec['row_count']} != len(rows)={row_count_actual}")
+        if "column_count" in sec and isinstance(sec.get("column_count"), int):
+            if sec["column_count"] != header_len:
+                errors.append(
+                    f"section={sec_name[:60]!r}: column_count={sec['column_count']} != header_len={header_len}"
+                )
+
+        # Optional deep check: verify the precomputed header-grid matches `rows`.
+        grid_col_headers = sec.get("column_headers")
+        grid_row_headers = sec.get("row_headers")
+        grid_data = sec.get("data")
+        if grid_col_headers is not None or grid_row_headers is not None or grid_data is not None:
+            if not isinstance(grid_col_headers, list) or not isinstance(grid_row_headers, list) or not isinstance(grid_data, list):
+                errors.append(
+                    f"section={sec_name[:60]!r}: grid keys present but types invalid "
+                    f"(column_headers/row_headers/data must be lists)"
+                )
+            else:
+                expected_col_count = header_len
+                expected_row_header_count = max(0, row_count_actual - 1)
+                if len(grid_col_headers) != expected_col_count:
+                    errors.append(
+                        f"section={sec_name[:60]!r}: len(column_headers)={len(grid_col_headers)} != column_count={expected_col_count}"
+                    )
+                if len(grid_row_headers) != expected_row_header_count:
+                    errors.append(
+                        f"section={sec_name[:60]!r}: len(row_headers)={len(grid_row_headers)} != row_count-1={expected_row_header_count}"
+                    )
+                if len(grid_data) != expected_row_header_count:
+                    errors.append(
+                        f"section={sec_name[:60]!r}: len(data)={len(grid_data)} != row_count-1={expected_row_header_count}"
+                    )
+
+                # data is expected to be [row_count-1][column_count] where data[ri][ci] == rows[ri+1][ci+1]
+                # (this follows the project’s own `_build_header_grid` indexing).
+                for ri in range(expected_row_header_count):
+                    if ri >= len(grid_data):
+                        continue
+                    row_data = grid_data[ri]
+                    if not isinstance(row_data, list):
+                        errors.append(f"section={sec_name[:60]!r}: data row_index={ri} is not a list")
+                        continue
+                    if len(row_data) != expected_col_count:
+                        errors.append(
+                            f"section={sec_name[:60]!r}: data[{ri}] len={len(row_data)} != column_count={expected_col_count}"
+                        )
+                        continue
+                    for ci in range(expected_col_count):
+                        expected_cell = None
+                        # rows[ri+1] is the original table row
+                        if ri + 1 < len(rows) and (ci + 1) < len(rows[ri + 1]):
+                            expected_cell = rows[ri + 1][ci + 1]
+                        actual_cell = row_data[ci] if ci < len(row_data) else None
+                        if not _cells_equal(expected_cell, actual_cell):
+                            errors.append(
+                                f"section={sec_name[:60]!r}: grid/data mismatch at (row={ri}, col={ci})"
+                            )
+                            break
+
+                # Check row_headers/column_headers labels match the corresponding `rows` cells.
+                for ci in range(expected_col_count):
+                    if ci < len(grid_col_headers) and ci < len(header_row):
+                        if not _cells_equal(header_row[ci], grid_col_headers[ci]):
+                            errors.append(f"section={sec_name[:60]!r}: column_headers mismatch at index={ci}")
+                            break
+                for ri in range(expected_row_header_count):
+                    if ri < len(grid_row_headers) and (ri + 1) < len(rows):
+                        if not _cells_equal(rows[ri + 1][0] if rows[ri + 1] else None, grid_row_headers[ri]):
+                            errors.append(f"section={sec_name[:60]!r}: row_headers mismatch at row_index={ri}")
+                            break
+
+    # Simple warnings (quality heuristics). Keep these low-noise for unattended runs.
+    if not errors:
+        # If everything has very few numeric cells, it’s suspicious.
+        total_cells = 0
+        numeric_cells = 0
+        for sec in sections:
+            if not isinstance(sec, dict):
+                continue
+            rows = sec.get("rows")
+            if not isinstance(rows, list) or not rows:
+                continue
+            for r in rows:
+                if not isinstance(r, list):
+                    continue
+                for c in r:
+                    total_cells += 1
+                    if c is not None and _cell_looks_numeric(c):
+                        numeric_cells += 1
+        if total_cells > 0:
+            numeric_ratio = numeric_cells / total_cells
+            if numeric_ratio < 0.005:
+                warnings.append(f"low numeric density (numeric_ratio={numeric_ratio:.4f})")
+
+    # Compute status/score.
+    if errors:
+        requires_review = True
+        status = "failed"
+        quality_score = 0.0
+    elif warnings:
+        requires_review = True
+        status = "requires_review"
+        quality_score = max(0.0, 1.0 - 0.05 * len(warnings))
+    else:
+        requires_review = False
+        status = "ok"
+        quality_score = 1.0
+
+    return {
+        "status": status,
+        "requires_review": requires_review,
+        "quality_score": float(quality_score),
+        "errors": errors,
+        "warnings": warnings,
+    }
 
 
 def _clean_loaded_cell(c):
