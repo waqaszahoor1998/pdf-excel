@@ -1,4 +1,10 @@
 .env
+.DS_Store
+PRIVATE_*.md
+docs/CURRENT_FEATURES_AND_WORKFLOWS.md
+docs/CURRENT_FEATURES_AND_WORKFLOWS.pdf
+scripts/generate_features_pdf.py
+evaluation/
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -6,7 +12,6 @@ __pycache__/
 venv/
 *.xlsx
 *.pdf
-!docs/REPORT.pdf
 uploads/
 output/
 models/

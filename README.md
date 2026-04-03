@@ -36,7 +36,6 @@ Extract **tables and structured data from PDFs** into **Excel** and **JSON**. Su
 - **Hybrid extraction** (`hybrid_extract.py`): library path first; optional VL for difficult pages. See `docs/HYBRID_ROUTING.md`.
 - **QB-oriented typed fields**: `field_service.py`, `fields_from_qb_output.py`, `qb_posting_rules.py` for structured JSON alongside QB workbooks.
 - **Family template population**: `template_populator.py` (optional account/template workflows).
-- **Docs**: `docs/REPORT.md` and `docs/REPORT.pdf` (bundled), `docs/IMPLEMENTATION_PLAN.md`, baseline/hybrid notes under `docs/`.
 
 **Carried from v3.1**
 
@@ -163,9 +162,13 @@ Full steps and “how to share with someone else” are in **`docs/TEST_AND_SHAR
 | Doc | Contents |
 |-----|----------|
 | **`docs/TEST_AND_SHARE.md`** | How to test (digital + VL), how to share the project and run it on another system. |
+| **`docs/PDF_JSON_FORMAT.md`** | Why JSON first, shape of `sections`, editing workflow. |
+| **`docs/EXPECTED_FORMAT.md`** | QB-style sheet naming and layout targets. |
+| **`docs/QB_STYLE_OUTPUT.md`** | Merging sections, `title_to_sheet`, colors. |
+| **`docs/HYBRID_ROUTING.md`** | How hybrid extraction routes weak pages to VL (`docs/hybrid.md` overview). |
 | **`docs/VL_GPU_WHY_AND_FIX.md`** | Why use GPU, CUDA/DLL issues, and how to fix them (no fallback to CPU). |
 | **`docs/VL_PIPELINE_AND_LIBRARIES.md`** | What PyMuPDF, pdfplumber, openpyxl do; how the VL pipeline and prompt work. |
-| **`docs/QB_STYLE_OUTPUT.md`** | QB-style sheet names, merging continuations, and `title_to_sheet` config. |
+| **`docs/VL_JSON_IMPROVEMENTS.md`** | Notes on improving VL JSON output. |
 
 ---
 
