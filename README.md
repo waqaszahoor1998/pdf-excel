@@ -27,7 +27,7 @@ Extract **tables and structured data from PDFs** into **Excel** and **JSON**. Su
 - **CLI**  
   `run.py tables`, `run.py json`, `run.py from-json`, `run.py ask` (optional AI backend). See [Run](#run) below.
 
-**Which command should I use?** See **[docs/WHICH_COMMAND.md](docs/WHICH_COMMAND.md)**. Default: `run.py tables` (library + QB). The JSON `meta` includes internal validation, PDF audit (when enabled), and **`library_routing`** (pages the library flags as candidates for hybrid/VL—no need to run three pipelines to compare).
+**Which command should I use?** See **[docs/WHICH_COMMAND.md](docs/WHICH_COMMAND.md)**. Default: `run.py tables` (library + QB). The JSON `meta` includes internal validation, PDF audit (when enabled), and **`library_routing`** (pages the library flags as candidates for optional hybrid/VL).
 
 ---
 
