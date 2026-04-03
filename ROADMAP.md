@@ -105,8 +105,8 @@ The manual QB sheet is the quality bar. The phases below are ordered so that, on
 ### 4.1 Add section patterns for other brokers
 
 | What | When you have a sample PDF from another custodian, add section-title patterns so we recognize their “Account Summary”, “Portfolio Activity”, etc., and map to the same QB sheet names. |
-| How | Add regex entries to `REPORT_TITLE_TO_SHEET` in `tables_to_excel.py` and/or to `_target_sheet_name` in `pdf_to_qb.py`; document in `EXPECTED_FORMAT.md`. |
-| Where | `tables_to_excel.py`, `pdf_to_qb.py`, `EXPECTED_FORMAT.md`. |
+| How | Add regex entries to `REPORT_TITLE_TO_SHEET` in `tables_to_excel.py` and/or to `_target_sheet_name` in `pdf_to_qb.py`; document in `docs/EXPECTED_FORMAT.md`. |
+| Where | `tables_to_excel.py`, `pdf_to_qb.py`, `docs/EXPECTED_FORMAT.md`. |
 | Done | [ ] |
 
 ### 4.2 Per-custodian tweaks (optional)
@@ -193,9 +193,9 @@ So: the phases and order are designed to get you to **acceptable, QB-style resul
 | Extraction, merge rules, section naming | `tables_to_excel.py` |
 | QB merge, colors, column normalization (future) | `pdf_to_qb.py` |
 | App: upload → download | `app.py`, `templates/index.html` |
-| Target format and color usage | `EXPECTED_FORMAT.md` |
+| Target format and color usage | `docs/EXPECTED_FORMAT.md` |
 | This roadmap | `ROADMAP.md` |
-| Original project plan | `PLAN.md` |
+| Original project plan | `docs/archive/PLAN.md` |
 
 ---
 

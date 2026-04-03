@@ -61,7 +61,7 @@ SECTION_TITLE_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-# Map PDF report/section titles to target sheet names (see EXPECTED_FORMAT.md).
+# Map PDF report/section titles to target sheet names (see docs/EXPECTED_FORMAT.md).
 # Order matters: more specific patterns first. Includes broker combined-statement sections (e.g. 9004 PDF).
 REPORT_TITLE_TO_SHEET = [
     # Fund-accounting / QB Automation target names

@@ -105,8 +105,10 @@ flask --app app run
 
 Open **http://127.0.0.1:5000**. Upload a PDF, then:
 
-- **Extract to Excel** — Uses pdfplumber (digital) or, if you check **“Use vision model”**, the VL pipeline (scanned). You get a ZIP with .xlsx and .json.
-- **Ask AI** — Requires `ANTHROPIC_API_KEY` in `.env`; sends the PDF to Anthropic for natural-language extraction.
+- **Library + QB** (default) — Text-based PDFs: local extraction, QB-style Excel. ZIP includes `.xlsx`, `.json`, and audit report when audit runs.
+- **Hybrid** / **Vision only** — Needs VL install; for difficult or scanned PDFs. Same ZIP idea when JSON is produced.
+- **PDF → JSON only** (second card) — JSON (+ optional full audit) as a ZIP.
+- **Ask AI** — Requires `ANTHROPIC_API_KEY` in `.env`; natural-language extraction via Anthropic.
 
 ### CLI
 
@@ -162,12 +164,16 @@ Full steps and “how to share with someone else” are in **`docs/TEST_AND_SHAR
 
 ## Documentation
 
-| Doc | Contents |
-|-----|----------|
-| **`docs/TEST_AND_SHARE.md`** | How to test (digital + VL), how to share the project and run it on another system. |
-| **`docs/VL_GPU_WHY_AND_FIX.md`** | Why use GPU, CUDA/DLL issues, and how to fix them (no fallback to CPU). |
-| **`docs/VL_PIPELINE_AND_LIBRARIES.md`** | What PyMuPDF, pdfplumber, openpyxl do; how the VL pipeline and prompt work. |
-| **`docs/QB_STYLE_OUTPUT.md`** | QB-style sheet names, merging continuations, and `title_to_sheet` config. |
+**Index:** **[docs/README.md](docs/README.md)** — what to read first (`WHICH_COMMAND`, workflows, config, VL, format).
+
+- **Quick orientation:** [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)  
+- **Commands and `meta`:** [docs/WHICH_COMMAND.md](docs/WHICH_COMMAND.md), [docs/WORKFLOWS_AND_COMMANDS.md](docs/WORKFLOWS_AND_COMMANDS.md)  
+- **JSON shape:** [docs/PDF_JSON_FORMAT.md](docs/PDF_JSON_FORMAT.md)  
+- **Testing / sharing:** [docs/TEST_AND_SHARE.md](docs/TEST_AND_SHARE.md)  
+- **VL / GPU:** [docs/VL_GPU_WHY_AND_FIX.md](docs/VL_GPU_WHY_AND_FIX.md), [docs/VL_PIPELINE_AND_LIBRARIES.md](docs/VL_PIPELINE_AND_LIBRARIES.md)  
+- **QB-style sheets:** [docs/QB_STYLE_OUTPUT.md](docs/QB_STYLE_OUTPUT.md), [docs/EXPECTED_FORMAT.md](docs/EXPECTED_FORMAT.md)  
+
+Older plans and one-off analyses are under **[docs/archive/](docs/archive/)**.
 
 ---
 

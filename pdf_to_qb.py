@@ -5,7 +5,7 @@ Transform extracted PDF tables into QB Automation Sheet format.
 Pipeline: PDF → (tables_to_excel) → raw xlsx → (this module) → QB-format xlsx.
 
 - Groups sheets by target name (e.g. all "Asset Allocation" into one sheet).
-- Uses standard QB-style sheet names (see EXPECTED_FORMAT.md).
+- Uses standard QB-style sheet names (see docs/EXPECTED_FORMAT.md).
 - Preserves table structure; merges duplicate section types into one sheet per type.
 """
 

@@ -80,7 +80,7 @@ So the plan below focuses on **defining the target**, then **doing a minimal set
 ### Step 3 — Reuse cleanup and naming (optional but recommended)
 
 - Run the **same** (or a subset of) cleanup used for JPM: footer phrases, header merges, `title_to_sheet` (so “PORTFOLIO ACTIVITY” → “Portfolio Activity” sheet name).  
-- Ensures GS output **looks** like our intended format (EXPECTED_FORMAT.md) and doesn’t feel like a raw dump.
+- Ensures GS output **looks** like our intended format (`docs/EXPECTED_FORMAT.md`) and doesn’t feel like a raw dump.
 
 ### Step 4 — Validate and stop
 

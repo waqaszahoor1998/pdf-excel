@@ -1,7 +1,7 @@
 # Comparison: Result (004) vs QB Format
 
 **Result file:** `9004-20251231-Combined Statement-004.xlsx` (from Downloads)  
-**Reference:** Project QB format (EXPECTED_FORMAT.md + pdf_to_qb.py / tables_to_excel.py)
+**Reference:** Project QB format (`docs/EXPECTED_FORMAT.md` + `pdf_to_qb.py` / `tables_to_excel.py`)
 
 ---
 
