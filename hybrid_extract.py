@@ -291,6 +291,33 @@ def detect_bad_pages(sections: list[tuple], quality_threshold: float = 0.72) -> 
     return sorted(bad), diagnostics
 
 
+def library_routing_meta(sections: list[tuple]) -> dict:
+    """
+    Run the same "bad page" heuristics as hybrid, without calling VL.
+
+    Merge the returned dict under extraction JSON ``meta`` (e.g. ``meta["library_routing"]``)
+    so library-only runs still show which pages would be candidates for hybrid/VL.
+
+    This does not judge correctness vs the PDF; use ``meta.audit_summary`` and validation fields for that.
+    """
+    bad_pages, routing = detect_bad_pages(sections)
+    has_candidates = bool(bad_pages)
+    return {
+        "library_routing": {
+            "candidate_vl_pages": bad_pages,
+            "page_diagnostics": {str(k): v for k, v in sorted(routing.items())},
+            "hybrid_recommended": has_candidates,
+            "recommended_action": "consider_hybrid" if has_candidates else "library_sufficient",
+            "hint": (
+                "Library heuristics flag these pages as weak or non-tabular; if data is missing or "
+                "audit fails, re-run with: python run.py hybrid <this.pdf> -o out.json"
+                if has_candidates
+                else "No pages flagged by library heuristics; still verify meta.status and audit_summary vs the PDF."
+            ),
+        },
+    }
+
+
 def hybrid_pdf_to_json(
     pdf_path: str | Path,
     output_path: str | Path,
@@ -336,9 +363,24 @@ def hybrid_pdf_to_json(
     }
 
     if not bad_pages:
-        # No VL: write library-only JSON
+        # No VL: write library-only JSON (same internal validation as merged hybrid path)
         section_dicts = refine_json_sections(_sections_to_json_serializable(library_sections))
         payload = {"sections": section_dicts, "meta": meta}
+        try:
+            from tables_to_excel import evaluate_extraction_json_correctness
+
+            evaluation = evaluate_extraction_json_correctness(payload)
+            payload["meta"].update(
+                {
+                    "status": evaluation.get("status"),
+                    "requires_review": evaluation.get("requires_review"),
+                    "quality_score": evaluation.get("quality_score"),
+                    "validation_errors": evaluation.get("errors"),
+                    "validation_warnings": evaluation.get("warnings"),
+                }
+            )
+        except Exception as e:
+            log.warning("validation skipped in hybrid_pdf_to_json (no VL branch): %s", e)
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2, ensure_ascii=False)
         log.info("Hybrid: no bad pages; wrote library-only JSON to %s", output_path)

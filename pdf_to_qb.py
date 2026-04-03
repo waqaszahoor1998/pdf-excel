@@ -912,15 +912,18 @@ def pdf_to_qb_excel(
         _write_json_from_sections,
         _write_sections_to_workbook,
     )
+    from hybrid_extract import library_routing_meta
 
     out_path = Path(output_path)
     if out_path.exists() and not overwrite:
         raise FileExistsError(f"Output exists: {out_path}")
 
     # 1. PDF → JSON (canonical intermediate); keep only table-like sections (no long prose)
-    sections = extract_sections_from_pdf(pdf_path)
-    sections = [merge_section_header_rows(s) for s in sections]
-    sections = filter_sections_to_tables_only(sections)
+    sections_merged = extract_sections_from_pdf(pdf_path)
+    sections_merged = [merge_section_header_rows(s) for s in sections_merged]
+    # Same routing heuristics as hybrid (no VL): which pages look weak → candidate_vl_pages in meta
+    routing_meta = library_routing_meta(sections_merged)
+    sections = filter_sections_to_tables_only(sections_merged)
     json_path = Path(json_path_out) if json_path_out else Path(tempfile.NamedTemporaryFile(suffix=".json", delete=False).name)
     try:
         _write_json_from_sections(
@@ -933,6 +936,8 @@ def pdf_to_qb_excel(
                 "generated_at_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
                 "generator": "pdf_to_qb.pdf_to_qb_excel",
                 "note": "This JSON may include filtering to table-like sections only before QB transform.",
+                "extraction_pipeline": "library_then_qb",
+                **routing_meta,
             },
         )
         sections_from_json = load_sections_from_json(str(json_path))

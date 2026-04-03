@@ -2172,6 +2172,9 @@ def pdf_to_json(
     except Exception:
         page_count = None
     out.parent.mkdir(parents=True, exist_ok=True)
+    from hybrid_extract import library_routing_meta
+
+    lr = library_routing_meta(sections)
     _write_json_from_sections(
         sections,
         out,
@@ -2182,6 +2185,8 @@ def pdf_to_json(
             "page_count": page_count,
             "generated_at_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
             "generator": "tables_to_excel.pdf_to_json",
+            "extraction_pipeline": "library_json_only",
+            **lr,
         },
     )
     return str(out)

@@ -7,6 +7,7 @@ venv/
 *.xlsx
 *.pdf
 !docs/REPORT.pdf
+!docs/Workflows_and_Commands_Report.pdf
 uploads/
 output/
 models/

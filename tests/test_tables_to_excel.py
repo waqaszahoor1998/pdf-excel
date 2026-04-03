@@ -14,6 +14,7 @@ from tables_to_excel import (
 )
 
 from pdf_json_audit import _flatten_json_sections, _check_invented, compute_audit_automation_metrics
+from hybrid_extract import library_routing_meta
 
 
 class TestMergeFragmentedRow:
@@ -245,3 +246,11 @@ def test_compute_audit_automation_metrics_pass_and_fail():
     assert m2["passed_automation"] is False
     assert m2["pages_with_hard_issues"] == 1
     assert m2["confidence_pct"] == 50.0
+
+
+def test_library_routing_meta_has_expected_keys():
+    out = library_routing_meta([])
+    lr = out.get("library_routing") or {}
+    assert "candidate_vl_pages" in lr
+    assert "recommended_action" in lr
+    assert lr["recommended_action"] == "library_sufficient"
