@@ -14,6 +14,7 @@ This complements internal JSON validation (row/column tallies) by comparing to t
 from __future__ import annotations
 
 import json
+import os
 import re
 import statistics
 import sys
@@ -410,22 +411,112 @@ def audit_pdf_vs_extraction_json(
     }
 
 
+def _page_has_hard_issue(page_report: dict) -> bool:
+    """Hard issues: missing numbers, invented cell values, or content on page but nothing extracted."""
+    rnum = page_report.get("check_numeric_coverage") or {}
+    if int(rnum.get("missing_count") or 0) > 0:
+        return True
+    rinv = page_report.get("check_invented_values") or {}
+    if int(rinv.get("invented_count") or 0) > 0:
+        return True
+    for i in (page_report.get("check_structural") or {}).get("issues") or []:
+        if isinstance(i, dict) and i.get("type") == "no_sections_but_has_content":
+            return True
+    return False
+
+
+def compute_audit_automation_metrics(
+    report: dict,
+    *,
+    min_confidence_pct: float,
+    require_zero_hard_pages: bool = True,
+) -> dict:
+    """
+    Derive unattended pass/fail from an audit report.
+
+    - confidence_pct: among *evaluated* pages (those with PDF/JSON content to compare),
+      percent of pages with no issue flag (has_issue false).
+    - Hard-issue pages: numeric gaps, invented values, or PDF text but no extracted sections.
+
+    Default policy for automation: require zero hard-issue pages AND confidence >= min_confidence_pct.
+    """
+    pages = report.get("pages") or []
+    pe = len(pages)
+    hard_pages = 0
+    any_issue_pages = 0
+    for p in pages:
+        if not isinstance(p, dict):
+            continue
+        if p.get("has_issue"):
+            any_issue_pages += 1
+        if _page_has_hard_issue(p):
+            hard_pages += 1
+
+    if pe == 0:
+        confidence_pct = 100.0
+    else:
+        confidence_pct = 100.0 * (pe - any_issue_pages) / pe
+
+    hard_clean = hard_pages == 0
+    conf_ok = confidence_pct >= min_confidence_pct - 1e-9
+    if require_zero_hard_pages:
+        passed_automation = bool(hard_clean and conf_ok)
+    else:
+        passed_automation = bool(conf_ok)
+
+    if passed_automation:
+        reason = (
+            f"Automation pass: confidence {confidence_pct:.1f}% (>={min_confidence_pct:g}%); "
+            f"hard-issue pages {hard_pages}; evaluated pages {pe}."
+        )
+    else:
+        parts = []
+        if require_zero_hard_pages and not hard_clean:
+            parts.append(f"hard-issue pages={hard_pages} (require 0)")
+        if not conf_ok:
+            parts.append(f"confidence {confidence_pct:.1f}% < {min_confidence_pct:g}%")
+        reason = "Automation fail: " + ("; ".join(parts) if parts else "thresholds not met")
+
+    return {
+        "pages_evaluated": pe,
+        "pages_with_any_issue": any_issue_pages,
+        "pages_with_hard_issues": hard_pages,
+        "confidence_pct": round(confidence_pct, 4),
+        "min_confidence_pct": float(min_confidence_pct),
+        "require_zero_hard_pages": bool(require_zero_hard_pages),
+        "passed_automation": passed_automation,
+        "automation_reason": reason,
+    }
+
+
 def apply_audit_to_extraction_file(
     pdf_path: str | Path,
     extraction_json_path: str | Path,
     *,
-    audit_pages: int | None = 3,
+    audit_pages: int | None = None,
     strict: bool = False,
     report_path: str | Path | None = None,
     silent: bool = False,
+    min_confidence_pct: float | None = None,
+    require_zero_hard_pages: bool | None = None,
 ) -> tuple[dict, bool]:
     """
     Run PDF-vs-JSON audit, merge summary into extraction JSON meta, optional full report file.
 
-    Returns (audit_report, ok). ok=True when numeric gaps, invented values, and no-sections are all zero
-    within audited pages.
+    Returns (audit_report, ok). **ok** is True when **automation** passes (confidence threshold +
+    zero hard-issue pages by default), suitable for unattended servers.
 
-    If audit_pages <= 0, skips audit and returns ({}, True).
+    **audit_pages**:
+      - ``None`` (default): audit **all** pages of the PDF.
+      - positive int: audit only the first N pages (faster smoke tests).
+      - ``0`` or negative: skip audit; returns ``({}, True)``.
+
+    **Thresholds** (unattended defaults, overridable via env):
+      - ``AUDIT_MIN_CONFIDENCE_PCT`` (default ``90``): minimum percent of evaluated pages with
+        no issues (``has_issue`` false).
+      - ``AUDIT_REQUIRE_ZERO_HARD_PAGES`` (default ``1``): if set, any page with numeric gaps,
+        invented values, or PDF content but no sections fails automation regardless of confidence.
+
     If silent=True, do not print to stderr (use from web servers).
     """
     pdf_path = Path(pdf_path)
@@ -435,6 +526,17 @@ def apply_audit_to_extraction_file(
     if audit_pages is not None and audit_pages <= 0:
         return {}, True
 
+    if min_confidence_pct is None:
+        raw = (os.environ.get("AUDIT_MIN_CONFIDENCE_PCT") or "90").strip()
+        try:
+            min_confidence_pct = float(raw)
+        except ValueError:
+            min_confidence_pct = 90.0
+
+    if require_zero_hard_pages is None:
+        require_zero_hard_pages = (os.environ.get("AUDIT_REQUIRE_ZERO_HARD_PAGES", "1").strip().lower() not in ("0", "false", "no"))
+
+    # None => full document; int => cap at first N pages
     report = audit_pdf_vs_extraction_json(pdf_path, extraction_json_path, max_pages=audit_pages)
     summary = report.get("summary") or {}
 
@@ -444,7 +546,17 @@ def apply_audit_to_extraction_file(
     structural = int(summary.get("pages_with_structural_issues") or 0)
     text_gaps = int(summary.get("pages_with_text_gaps") or 0)
 
-    ok = (numeric_gaps == 0) and (no_sections == 0) and (invented == 0)
+    passed_legacy = (numeric_gaps == 0) and (no_sections == 0) and (invented == 0)
+    auto = compute_audit_automation_metrics(
+        report,
+        min_confidence_pct=min_confidence_pct,
+        require_zero_hard_pages=require_zero_hard_pages,
+    )
+    passed_automation = bool(auto.get("passed_automation"))
+    ok = passed_automation
+
+    scope = "all" if audit_pages is None else f"first_{audit_pages}"
+    total_pdf_pages = int(report.get("total_pdf_pages") or 0)
 
     try:
         payload = json.loads(extraction_json_path.read_text(encoding="utf-8"))
@@ -452,20 +564,32 @@ def apply_audit_to_extraction_file(
         if not isinstance(meta, dict):
             meta = {}
         meta["audit_summary"] = {
-            "audit_pages": audit_pages,
+            "audit_scope": scope,
+            "audit_page_cap": audit_pages,
+            "total_pdf_pages": total_pdf_pages,
             "pages_audited": int(summary.get("pages_audited") or 0),
             "pages_with_numeric_gaps": numeric_gaps,
             "pages_with_text_gaps": text_gaps,
             "pages_with_structural_issues": structural,
             "pages_with_invented_values": invented,
             "pages_no_sections_but_content": no_sections,
-            "passed": bool(ok),
+            "passed_legacy": bool(passed_legacy),
+            "confidence_pct": auto.get("confidence_pct"),
+            "min_confidence_pct": auto.get("min_confidence_pct"),
+            "pages_with_hard_issues": auto.get("pages_with_hard_issues"),
+            "passed_automation": passed_automation,
+            "automation_reason": auto.get("automation_reason"),
+            # Primary gate for unattended pipelines / strict CLI exit code:
+            "passed": bool(passed_automation),
         }
-        if not ok:
+        if not passed_automation:
             meta["requires_review"] = True
             cur = (meta.get("status") or "").strip().lower()
             if cur != "failed":
-                meta["status"] = "requires_review"
+                # Unattended: treat audit failure as failed extraction so backends can reject without a human.
+                meta["status"] = "failed"
+            if not (meta.get("failure_reason") or "").strip():
+                meta["failure_reason"] = (auto.get("automation_reason") or "audit_failed")
         payload["meta"] = meta
         extraction_json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     except Exception:
@@ -476,12 +600,16 @@ def apply_audit_to_extraction_file(
         report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
 
     if not silent:
-        if ok:
-            print("Audit: PASS (no missing numbers / no invented values).", file=sys.stderr)
+        cp = auto.get("confidence_pct")
+        hp = auto.get("pages_with_hard_issues")
+        if passed_automation:
+            print(
+                f"Audit: AUTOMATION PASS (confidence {cp}%, hard-issue pages {hp}, scope={scope}).",
+                file=sys.stderr,
+            )
         else:
             print(
-                "Audit: REVIEW REQUIRED "
-                f"(numeric_gaps_pages={numeric_gaps}, invented_values_pages={invented}, no_sections_pages={no_sections}).",
+                f"Audit: AUTOMATION FAIL — {auto.get('automation_reason')}",
                 file=sys.stderr,
             )
             if strict:

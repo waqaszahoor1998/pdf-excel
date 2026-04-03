@@ -524,7 +524,12 @@ def main() -> int:
     p_tables.add_argument("-o", "--output", default=None, help="Output .xlsx path (single PDF only)")
     p_tables.add_argument("--no-overwrite", action="store_true", help="Do not overwrite existing output")
     p_tables.add_argument("--no-audit", action="store_true", help="Skip PDF-vs-JSON audit step (not recommended)")
-    p_tables.add_argument("--audit-pages", type=int, default=3, help="Audit only first N pages (default 3; set 0 to disable)")
+    p_tables.add_argument(
+        "--audit-pages",
+        type=int,
+        default=None,
+        help="Audit page cap: default=all pages; N=first N only (smoke); 0=disable audit",
+    )
     p_tables.add_argument("--audit-strict", action="store_true", help="Fail command (exit 2) when audit requires review")
     p_tables.add_argument("--audit-report", default=None, help="Optional path to write full audit report JSON")
     p_tables.set_defaults(func=cmd_tables)
@@ -537,7 +542,12 @@ def main() -> int:
     p_hybrid.add_argument("--no-overwrite", action="store_true", help="Do not overwrite existing output")
     p_hybrid.add_argument("--excel", action="store_true", help="Also convert the JSON to Excel (same path with .xlsx)")
     p_hybrid.add_argument("--no-audit", action="store_true", help="Skip PDF-vs-JSON audit step (not recommended)")
-    p_hybrid.add_argument("--audit-pages", type=int, default=3, help="Audit only first N pages (default 3; set 0 to disable)")
+    p_hybrid.add_argument(
+        "--audit-pages",
+        type=int,
+        default=None,
+        help="Audit page cap: default=all pages; N=first N only; 0=disable audit",
+    )
     p_hybrid.add_argument("--audit-strict", action="store_true", help="Fail command (exit 2) when audit requires review")
     p_hybrid.add_argument("--audit-report", default=None, help="Optional path to write full audit report JSON")
     p_hybrid.set_defaults(func=cmd_hybrid)
@@ -547,7 +557,12 @@ def main() -> int:
     p_json.add_argument("-o", "--output", default=None, help="Output .json path (single PDF only)")
     p_json.add_argument("--no-overwrite", action="store_true", help="Do not overwrite existing output")
     p_json.add_argument("--no-audit", action="store_true", help="Skip PDF-vs-JSON audit step (not recommended)")
-    p_json.add_argument("--audit-pages", type=int, default=3, help="Audit only first N pages (default 3; set 0 to disable)")
+    p_json.add_argument(
+        "--audit-pages",
+        type=int,
+        default=None,
+        help="Audit page cap: default=all pages; N=first N only; 0=disable audit",
+    )
     p_json.add_argument("--audit-strict", action="store_true", help="Fail command (exit 2) when audit requires review")
     p_json.add_argument("--audit-report", default=None, help="Optional path to write full audit report JSON")
     p_json.set_defaults(func=cmd_json)

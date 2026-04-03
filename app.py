@@ -57,9 +57,20 @@ _default_mb = max(1, min(100, int(_val) if _val.isdigit() else 40))
 MAX_CONTENT_LENGTH = _default_mb * 1024 * 1024
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
 
-# Web UI: cap VL/hybrid page count and audit depth (matches CLI defaults)
+# Web UI: cap VL/hybrid page count; audit runs on full PDF by default (see AUDIT_MAX_PAGES)
 WEB_MAX_VL_PAGES = 20
-WEB_AUDIT_PAGES = 3
+
+
+def _web_audit_page_cap():
+    """None = audit all pages. Set AUDIT_MAX_PAGES=N to audit first N only (faster)."""
+    v = (os.environ.get("AUDIT_MAX_PAGES") or "").strip()
+    if not v:
+        return None
+    try:
+        n = int(v)
+        return n if n > 0 else None
+    except ValueError:
+        return None
 
 
 def _get_upload_limit_mb():
@@ -96,17 +107,16 @@ def _flash_audit_summary(json_path: Path) -> None:
         aud = meta.get("audit_summary") or {}
         if int(aud.get("pages_audited") or 0) == 0:
             return
-        if aud.get("passed"):
+        conf = aud.get("confidence_pct")
+        if aud.get("passed_automation"):
             flash(
-                "Audit: first pages match the PDF (numeric coverage and invented-value checks).",
+                f"Audit: automation pass (confidence {conf}%, scope {aud.get('audit_scope', '?')}).",
                 "success",
             )
         else:
             flash(
-                "Audit: review suggested — "
-                f"numeric gaps on {int(aud.get('pages_with_numeric_gaps') or 0)} page(s), "
-                f"invented-value flags on {int(aud.get('pages_with_invented_values') or 0)} page(s), "
-                f"content without sections on {int(aud.get('pages_no_sections_but_content') or 0)} page(s).",
+                (aud.get("automation_reason") or "Audit: automation failed.")
+                + f" — confidence {conf}%.",
                 "warning",
             )
     except Exception:
@@ -248,7 +258,7 @@ def extract():
             apply_audit_to_extraction_file(
                 pdf_path,
                 json_path,
-                audit_pages=WEB_AUDIT_PAGES,
+                audit_pages=_web_audit_page_cap(),
                 report_path=audit_report_path,
                 silent=True,
             )
@@ -354,7 +364,7 @@ def pdf_to_json_route():
         apply_audit_to_extraction_file(
             pdf_path,
             json_path,
-            audit_pages=WEB_AUDIT_PAGES,
+            audit_pages=_web_audit_page_cap(),
             report_path=audit_report_path,
             silent=True,
         )

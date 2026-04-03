@@ -13,7 +13,7 @@ from tables_to_excel import (
     _json_row_is_narrative_noise,
 )
 
-from pdf_json_audit import _flatten_json_sections, _check_invented
+from pdf_json_audit import _flatten_json_sections, _check_invented, compute_audit_automation_metrics
 
 
 class TestMergeFragmentedRow:
@@ -178,23 +178,6 @@ class TestEvaluateExtractionJsonCorrectness:
         assert out["requires_review"] is True
         assert out["errors"]
 
-
-def test_pdf_json_audit_helpers_flatten_and_invented():
-    sections = [
-        {
-            "name": "S",
-            "headings": ["H1"],
-            "rows": [["A", "1,234.56"], ["B", "X"]],
-        }
-    ]
-    flat, cells = _flatten_json_sections(sections)
-    assert "S" in flat
-    assert "H1" in flat
-    assert "1,234.56" in flat
-    # Invented detection: "X" is exempt (synthetic), but "ZZZ" should be flagged.
-    r = _check_invented(["ZZZ", "X"], pdf_raw_flat="... something else ...")
-    assert r["invented_count"] == 1
-
     def test_grid_cell_mismatch_is_failed(self):
         payload = {
             "sections": [
@@ -220,3 +203,45 @@ def test_pdf_json_audit_helpers_flatten_and_invented():
         out = evaluate_extraction_json_correctness(payload)
         assert out["status"] == "failed"
         assert out["errors"]
+
+
+def test_pdf_json_audit_helpers_flatten_and_invented():
+    sections = [
+        {
+            "name": "S",
+            "headings": ["H1"],
+            "rows": [["A", "1,234.56"], ["B", "X"]],
+        }
+    ]
+    flat, cells = _flatten_json_sections(sections)
+    assert "S" in flat
+    assert "H1" in flat
+    assert "1,234.56" in flat
+    # Invented detection: "X" is exempt (synthetic), but "ZZZ" should be flagged.
+    r = _check_invented(["ZZZ", "X"], pdf_raw_flat="... something else ...")
+    assert r["invented_count"] == 1
+
+
+def test_compute_audit_automation_metrics_pass_and_fail():
+    clean_page = {
+        "has_issue": False,
+        "check_numeric_coverage": {"missing_count": 0},
+        "check_invented_values": {"invented_count": 0},
+        "check_structural": {"issues": []},
+    }
+    m = compute_audit_automation_metrics({"pages": [clean_page]}, min_confidence_pct=90.0)
+    assert m["passed_automation"] is True
+    assert m["confidence_pct"] == 100.0
+
+    bad_numeric = {
+        "has_issue": True,
+        "check_numeric_coverage": {"missing_count": 2},
+        "check_invented_values": {"invented_count": 0},
+        "check_structural": {"issues": []},
+    }
+    m2 = compute_audit_automation_metrics(
+        {"pages": [clean_page, bad_numeric]}, min_confidence_pct=90.0
+    )
+    assert m2["passed_automation"] is False
+    assert m2["pages_with_hard_issues"] == 1
+    assert m2["confidence_pct"] == 50.0
