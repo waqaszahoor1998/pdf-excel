@@ -1,3 +1,7 @@
+# Personal notes (export to PDF locally; do not commit)
+PRIVATE_REFERENCE*.md
+PRIVATE_*.md
+
 .env
 .DS_Store
 __pycache__/
@@ -9,6 +13,10 @@ venv/
 *.pdf
 !docs/REPORT.pdf
 !docs/Workflows_and_Commands_Report.pdf
+# Local-only snapshot (not for remote)
+docs/CURRENT_FEATURES_AND_WORKFLOWS.md
+docs/CURRENT_FEATURES_AND_WORKFLOWS.pdf
+scripts/generate_features_pdf.py
 uploads/
 output/
 models/
