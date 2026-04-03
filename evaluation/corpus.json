@@ -1,0 +1,40 @@
+{
+  "purpose": "Diverse public PDFs to stress-test the library extraction pipeline. Categories help interpret QC scores: broker-style combined statements are the primary product target; other types surface edge cases for future heuristics or VL.",
+  "items": [
+    {
+      "id": "sample_generated",
+      "file": "generated_sample_report.pdf",
+      "source": "local",
+      "category": "synthetic_broker_like",
+      "note": "Created by scripts/make_sample_pdf.py. Expect high QC — sanity check for the evaluator."
+    },
+    {
+      "id": "irs_1040",
+      "file": "irs_f1040.pdf",
+      "url": "https://www.irs.gov/pub/irs-pdf/f1040.pdf",
+      "category": "government_form",
+      "note": "US tax form: boxes and lines, not broker tables. Useful to see how much structure we infer."
+    },
+    {
+      "id": "pdfjs_tracemonkey",
+      "file": "tracemonkey_pldi.pdf",
+      "url": "https://mozilla.github.io/pdf.js/web/compressed.tracemonkey-pldi-09.pdf",
+      "category": "academic_two_column",
+      "note": "PLDI-style paper: two-column layout, figures. Expect validation noise — different goal than statements."
+    },
+    {
+      "id": "arxiv_example",
+      "file": "arxiv_1805_04765.pdf",
+      "url": "https://arxiv.org/pdf/1805.04765.pdf",
+      "category": "academic_single_column",
+      "note": "arXiv article (single column typical). Long-form text + occasional tables."
+    },
+    {
+      "id": "sec_10k_template",
+      "file": "sec_form10k_template.pdf",
+      "url": "https://www.sec.gov/files/form10-k.pdf",
+      "category": "sec_structured_form",
+      "note": "SEC blank 10-K template. Some networks block curl — download in a browser if needed."
+    }
+  ]
+}

@@ -59,12 +59,23 @@ Extract **tables and structured data from PDFs** into **Excel** and **JSON**. Su
 
 ---
 
+## GitHub
+
+After you push this project to GitHub, share the repo URL with your team. Clone **your** remote, for example:
+
+```bash
+git clone <https://github.com/YOUR_ORG/YOUR_REPO.git>
+cd YOUR_REPO
+```
+
+Use the branch you use for releases (e.g. `v3.2` or `main`). All commands below assume you are in the repository root.
+
+---
+
 ## Quick start (run on your system)
 
 ```bash
-# Clone the v3.2 branch, then cd into the repo folder, e.g.:
-# git clone -b v3.2 https://github.com/waqaszahoor1998/pdf-excel.git
-cd pdf-excel
+cd pdf-excel   # or your clone folder
 python -m venv venv
 
 # Windows
@@ -103,11 +114,32 @@ See [Scanned PDFs (VL)](#scanned-pdfs-vision-model-vl) below and `docs/TEST_AND_
 flask --app app run
 ```
 
-Open **http://127.0.0.1:5000**. Upload a PDF, then:
+- **http://127.0.0.1:5000** — Main UI: PDF → JSON and/or Excel (library / hybrid / vision), optional Ask AI, JSON → Excel from a file.
+- **http://127.0.0.1:5000/workflows** — **Full list of HTTP routes**, matching CLI commands, and **forms** for advanced flows (template population, fields extract, clean JSON, standalone audit).
+
+#### HTTP routes (summary)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/` | Main extract UI |
+| GET | `/workflows` | Reference + advanced forms |
+| POST | `/extract` | Primary pipeline (JSON-only ZIP or Excel+JSON ZIP) |
+| POST | `/pdf-to-json` | Legacy JSON-only ZIP |
+| POST | `/json-to-excel` | Extraction JSON → Excel |
+| POST | `/populate-template` | PDF + template `.xlsx` → filled template |
+| POST | `/populate-template-from-fields` | `fields.json` + template → filled template |
+| POST | `/extract-fields` | PDF → `fields.json` |
+| POST | `/clean-json` | Clean repetitive sections in extraction JSON |
+| POST | `/audit-standalone` | PDF + JSON → full audit report JSON |
+
+Details and copy-paste CLI equivalents are on **`/workflows`**.
+
+On the home page:
 
 - **Library + QB** (default) — Text-based PDFs: local extraction, QB-style Excel. ZIP includes `.xlsx`, `.json`, and audit report when audit runs.
-- **Hybrid** / **Vision only** — Needs VL install; for difficult or scanned PDFs. Same ZIP idea when JSON is produced.
-- **PDF → JSON only** (second card) — JSON (+ optional full audit) as a ZIP.
+- **Hybrid** / **Vision only** — Needs VL install; for difficult or scanned PDFs.
+- **Download JSON (ZIP)** / **Download Excel + JSON (ZIP)** — Same pipeline; JSON-only skips building Excel.
+- **JSON → Excel only** — Upload extraction JSON to build the workbook without re-reading the PDF.
 - **Ask AI** — Requires `ANTHROPIC_API_KEY` in `.env`; natural-language extraction via Anthropic.
 
 ### CLI
@@ -116,10 +148,16 @@ Open **http://127.0.0.1:5000**. Upload a PDF, then:
 |--------|----------------|
 | `python run.py tables report.pdf` | Extract all tables → `output/report.xlsx` and `output/report.json`. |
 | `python run.py json report.pdf` | Extract → JSON only. |
-| `python run.py from-json output/report.json -o output/report.xlsx` | Convert an existing JSON (e.g. from VL) to Excel. |
+| `python run.py hybrid report.pdf` | Hybrid (library + VL on weak pages) → JSON; optional `--excel`. |
+| `python run.py from-json output/report.json -o output/report.xlsx` | Convert an existing JSON to Excel. |
+| `python run.py audit-json report.pdf output/report.json` | Standalone PDF vs JSON audit report. |
+| `python run.py clean-json output/report.json --pdf report.pdf` | Collapse repetitive sections in JSON. |
+| `python run.py populate-template report.pdf --template tpl.xlsx` | Fill your template from QB extraction. |
+| `python run.py populate-template-from-fields --fields-json fields.json --template tpl.xlsx` | Fill template from `fields` output. |
+| `python run.py fields report.pdf` | PDF → `fields.json` (structured field service). |
 | `python run.py ask report.pdf "query"` | Ask AI (needs API key). |
 
-Use `-o path/to/out.xlsx` to set the output path. Default output directory is `output/` (override with `OUTPUT_DIR` in `.env`).
+Use `-o path/to/out.xlsx` to set the output path. Default output directory is `output/` (override with `OUTPUT_DIR` in `.env`). Batch/multiple PDFs and many flags are **CLI-only**; see `python run.py --help` and **`/workflows`** in the app for parity with the browser.
 
 ### Scanned PDFs (vision model / VL)
 
@@ -159,6 +197,19 @@ Full steps and “how to share with someone else” are in **`docs/TEST_AND_SHAR
 - **`config/extract.json`** — Extraction limits, prompts, long-PDF options.
 - **`config/qb_cleanup.json`** — `footer_phrases`, `header_fragment_merges`, **`title_to_sheet`** (map section titles to sheet names for new PDFs).
 - **`.env`** — Copy from `.env.example`. Set `OUTPUT_DIR`, `ANTHROPIC_API_KEY` (for Ask AI), `QWEN2VL_MODEL_DIR` (or explicit paths) for VL.
+
+---
+
+## Evaluation (diverse PDF forms)
+
+The repo includes a **corpus** of different document types (see **`evaluation/corpus.json`**: synthetic sample, government form, academic two-column and single-column papers, optional SEC template). This gives a **broader** view than broker statements alone.
+
+```bash
+python scripts/download_eval_pdfs.py   # fetch corpus (some URLs may 403 — use a browser)
+python scripts/evaluate_public_pdfs.py
+```
+
+This writes **`evaluation/results/last_eval.json`** and **`last_eval.md`** (gitignored) with per-file **category**, page/section/row counts, QC scores, and audit hints. Use it to compare how extraction behaves across forms and to plan **universal** improvements (shared heuristics) vs. **type-specific** behavior (forms vs. papers vs. statements). **Broker-style statements** remain the primary product target; low scores on papers or IRS forms are often expected until dedicated heuristics or hybrid/VL are applied.
 
 ---
 

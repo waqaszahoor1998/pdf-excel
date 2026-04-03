@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Workflows — routes &amp; CLI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-deep: #07080c;
+      --text: #f1f3f7;
+      --text-muted: #8b92a5;
+      --accent: #2ee6d6;
+      --border: rgba(255,255,255,0.1);
+      --surface: rgba(18, 20, 28, 0.85);
+      --font-display: "Syne", system-ui, sans-serif;
+      --font-ui: "Outfit", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: var(--font-ui); background: var(--bg-deep); color: var(--text); line-height: 1.55; padding: 1.5rem 1rem 3rem; }
+    .wrap { max-width: 900px; margin: 0 auto; }
+    h1 { font-family: var(--font-display); font-size: 1.75rem; margin: 0 0 0.5rem; letter-spacing: -0.02em; }
+    .lead { color: var(--text-muted); margin: 0 0 1.5rem; font-size: 0.95rem; }
+    .topnav { margin-bottom: 1.5rem; }
+    .topnav a { color: var(--accent); font-weight: 600; text-decoration: none; }
+    .topnav a:hover { text-decoration: underline; }
+    section { margin-bottom: 2.25rem; }
+    h2 { font-family: var(--font-display); font-size: 1.15rem; margin: 0 0 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+    h3 { font-size: 0.95rem; margin: 1.25rem 0 0.5rem; color: var(--accent); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; background: var(--surface); border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
+    th, td { text-align: left; padding: 0.55rem 0.65rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { background: rgba(46, 230, 214, 0.08); font-weight: 600; }
+    tr:last-child td { border-bottom: none; }
+    code { font-family: ui-monospace, monospace; font-size: 0.85em; background: rgba(255,255,255,0.06); padding: 0.1em 0.35em; border-radius: 4px; }
+    pre { background: rgba(0,0,0,0.35); padding: 0.75rem 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.78rem; border: 1px solid var(--border); margin: 0.5rem 0 0; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.25rem; margin-bottom: 1rem; }
+    .card p { margin: 0 0 0.75rem; font-size: 0.85rem; color: var(--text-muted); }
+    label { display: block; font-weight: 600; font-size: 0.78rem; margin: 0.65rem 0 0.35rem; }
+    input[type="file"], input[type="text"], input[type="number"] { width: 100%; max-width: 420px; padding: 0.5rem; border-radius: 8px; border: 1px solid var(--border); background: #0c0e14; color: var(--text); font-family: inherit; }
+    button[type="submit"] {
+      margin-top: 0.85rem; padding: 0.65rem 1.25rem; font-family: inherit; font-weight: 600;
+      background: linear-gradient(180deg, #3ef0e0, #2ee6d6); color: #041312; border: none; border-radius: 8px; cursor: pointer;
+    }
+    button[type="submit"]:hover { filter: brightness(1.05); }
+    .flash { padding: 0.65rem 0.85rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.88rem; }
+    .flash.error { background: rgba(251,113,133,0.12); border: 1px solid rgba(251,113,133,0.3); }
+    .flash.success { background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.25); }
+    .flash.warning { background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.25); }
+    .note { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav class="topnav">
+      <a href="{{ url_for('index') }}">← Home (main extract UI)</a>
+    </nav>
+
+    <h1>All workflows</h1>
+    <p class="lead">Every <strong>browser</strong> endpoint and matching <strong>CLI</strong> command. Upload limits: <strong>{{ max_mb }} MB</strong> per request. VL (hybrid/vision): {% if vl_available %}available{% else %}not installed{% endif %}. Ask AI: {% if ai_available %}API key set{% else %}set <code>ANTHROPIC_API_KEY</code>{% endif %}.</p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash {{ category or 'error' }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <section>
+      <h2>HTTP routes (Flask)</h2>
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td>GET</td><td><code>/</code></td><td>Main UI: PDF → JSON / Excel, extraction engine, Ask AI, JSON→Excel.</td></tr>
+          <tr><td>GET</td><td><code>/workflows</code></td><td>This page: reference tables + advanced forms.</td></tr>
+          <tr><td>POST</td><td><code>/extract</code></td><td>Primary pipeline: <code>output_package</code> json_only | full, <code>extract_method</code>, optional Ask AI.</td></tr>
+          <tr><td>POST</td><td><code>/pdf-to-json</code></td><td>Legacy JSON-only ZIP (same family as main UI json_only).</td></tr>
+          <tr><td>POST</td><td><code>/json-to-excel</code></td><td>Canonical extraction JSON → QB-style Excel.</td></tr>
+          <tr><td>POST</td><td><code>/populate-template</code></td><td>PDF + your template .xlsx → filled template.</td></tr>
+          <tr><td>POST</td><td><code>/populate-template-from-fields</code></td><td><code>fields.json</code> + template .xlsx → filled template.</td></tr>
+          <tr><td>POST</td><td><code>/extract-fields</code></td><td>PDF → <code>fields.json</code> (typed field service output).</td></tr>
+          <tr><td>POST</td><td><code>/clean-json</code></td><td>Collapse repetitive sections in extraction JSON; optional source PDF for smarter cleaning.</td></tr>
+          <tr><td>POST</td><td><code>/audit-standalone</code></td><td>PDF + extraction JSON → full PDF-vs-JSON audit report JSON.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>CLI (<code>python run.py …</code>)</h2>
+      <p class="lead" style="margin-bottom:0.5rem">Batch/multiple PDFs and extra flags are CLI-only unless noted.</p>
+      <table>
+        <thead><tr><th>Command</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>tables</code></td><td>PDF(s) → QB Excel + JSON + audit (default batch output dir).</td></tr>
+          <tr><td><code>json</code></td><td>PDF(s) → extraction JSON (+ audit).</td></tr>
+          <tr><td><code>hybrid</code></td><td>Hybrid VL path → JSON; optional <code>--excel</code>.</td></tr>
+          <tr><td><code>from-json</code></td><td>JSON → Excel (same as <code>/json-to-excel</code>).</td></tr>
+          <tr><td><code>audit-json</code></td><td>Standalone audit (same as <code>/audit-standalone</code>).</td></tr>
+          <tr><td><code>clean-json</code></td><td>Clean repetitive sections (same as <code>/clean-json</code>).</td></tr>
+          <tr><td><code>populate-template</code></td><td>PDF + <code>--template</code> .xlsx (same as web form below).</td></tr>
+          <tr><td><code>populate-template-from-fields</code></td><td><code>--fields-json</code> + <code>--template</code>.</td></tr>
+          <tr><td><code>fields</code></td><td>PDF → fields JSON (same as <code>/extract-fields</code>).</td></tr>
+          <tr><td><code>ask</code></td><td>Natural-language extract (Anthropic or optional local backend).</td></tr>
+        </tbody>
+      </table>
+      <pre>python run.py tables report.pdf
+python run.py populate-template report.pdf --template path/to/template.xlsx -o out.xlsx
+python run.py --help</pre>
+    </section>
+
+    <section>
+      <h2>Advanced forms</h2>
+      <p class="lead">Same behavior as <code>run.py</code> commands in the table above.</p>
+
+      <h3>Populate template from PDF</h3>
+      <div class="card">
+        <p>Runs PDF → QB workbook internally, then fills your Goldman/QB-style template. Optional account id (e.g. <code>366-3</code>).</p>
+        <form action="{{ url_for('populate_template_route') }}" method="post" enctype="multipart/form-data">
+          <label>PDF</label>
+          <input type="file" name="pdf" accept=".pdf,application/pdf" required>
+          <label>Template .xlsx</label>
+          <input type="file" name="template" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+          <label>Account id (optional)</label>
+          <input type="text" name="account_id" placeholder="e.g. 366-3" autocomplete="off">
+          <button type="submit">Download populated template</button>
+        </form>
+      </div>
+
+      <h3>Populate template from fields.json</h3>
+      <div class="card">
+        <p>Use <code>fields.json</code> from the “Extract fields” step (or CLI <code>fields</code>) plus your template.</p>
+        <form action="{{ url_for('populate_template_from_fields_route') }}" method="post" enctype="multipart/form-data">
+          <label>fields.json</label>
+          <input type="file" name="fields_json" accept=".json,application/json" required>
+          <label>Template .xlsx</label>
+          <input type="file" name="template" accept=".xlsx" required>
+          <label>Account id (optional)</label>
+          <input type="text" name="account_id_fields" placeholder="e.g. 366-3" autocomplete="off">
+          <button type="submit">Download populated template</button>
+        </form>
+      </div>
+
+      <h3>Extract fields (PDF → fields.json)</h3>
+      <div class="card">
+        <p>Builds the QB workbook from the PDF, then emits structured <code>fields</code> for downstream template fill.</p>
+        <form action="{{ url_for('extract_fields_route') }}" method="post" enctype="multipart/form-data">
+          <label>PDF</label>
+          <input type="file" name="pdf" accept=".pdf" required>
+          <button type="submit">Download fields.json</button>
+        </form>
+      </div>
+
+      <h3>Clean extraction JSON</h3>
+      <div class="card">
+        <p>Removes repetitive sections. Optional PDF helps match phrases to pages (same as CLI <code>clean-json</code> with <code>--pdf</code>).</p>
+        <form action="{{ url_for('clean_json_route') }}" method="post" enctype="multipart/form-data">
+          <label>Extraction JSON</label>
+          <input type="file" name="json_file" accept=".json" required>
+          <label>Source PDF (optional)</label>
+          <input type="file" name="pdf" accept=".pdf">
+          <button type="submit">Download cleaned JSON</button>
+        </form>
+      </div>
+
+      <h3>Audit JSON vs PDF (standalone)</h3>
+      <div class="card">
+        <p>Full audit report without re-running extraction. Optional max pages for faster smoke tests.</p>
+        <form action="{{ url_for('audit_standalone_route') }}" method="post" enctype="multipart/form-data">
+          <label>PDF</label>
+          <input type="file" name="pdf" accept=".pdf" required>
+          <label>Extraction JSON</label>
+          <input type="file" name="json_file" accept=".json" required>
+          <label>Max pages (optional, empty = all)</label>
+          <input type="number" name="audit_max_pages" min="1" placeholder="e.g. 5">
+          <button type="submit">Download audit report JSON</button>
+        </form>
+      </div>
+    </section>
+
+    <section>
+      <h2>GitHub &amp; run</h2>
+      <p class="lead">See the root <strong>README.md</strong> for clone, venv, <code>pip install -r requirements.txt</code>, and <code>flask --app app run</code>. Documentation index: <code>docs/README.md</code>.</p>
+      <pre>git clone &lt;your-repo-url&gt;
+cd pdf-excel
+python -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+flask --app app run
+# Open http://127.0.0.1:5000 and http://127.0.0.1:5000/workflows</pre>
+      <p class="note">Replace the clone URL with your GitHub remote after you push this repository.</p>
+    </section>
+  </div>
+</body>
+</html>

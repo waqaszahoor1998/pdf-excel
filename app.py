@@ -5,12 +5,12 @@ Web UI for PDF → Excel (local only, no cloud LLM).
 Run: flask --app app run
 Or:  python app.py
 
-Then open http://127.0.0.1:5000 — upload a PDF, get all tables as Excel.
-Extraction: default uses pdfplumber + QB shaping. Choose hybrid (library + VL on
-difficult pages) or vision-only for scans; optional Ask AI uses Anthropic. After
-extraction, the first pages are audited vs the PDF; summary is in JSON meta and
-the ZIP may include a full audit report. No raw data is sent to any cloud service
-except Ask AI when that mode is used.
+Then open http://127.0.0.1:5000 — upload a PDF. Primary output is canonical JSON;
+optional ZIP adds Excel (QuickBooks-style). Use output_package json_only for JSON
+without building Excel. Hybrid/vision use the local VL stack; Ask AI uses Anthropic.
+After extraction, pages are audited vs the PDF; summary is in JSON meta and the ZIP
+may include a full audit report. No raw data is sent to any cloud service except
+Ask AI when that mode is used.
 """
 
 import io
@@ -45,7 +45,8 @@ from tables_to_excel import (
     _normalize_page_to_sheet,
 )
 from pdf_to_qb import pdf_to_qb_excel, transform_extracted_to_qb
-from pdf_json_audit import apply_audit_to_extraction_file
+from pdf_json_audit import apply_audit_to_extraction_file, audit_pdf_vs_extraction_json
+from template_populator import populate_template_from_fields_json, populate_template_from_qb_output
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-in-production")
@@ -178,6 +179,8 @@ def extract():
         json_path = Path(tmp_dir) / "output.json"
         audit_report_path = Path(tmp_dir) / "audit_report.json"
         extract_method = _extract_method_from_form(request.form)
+        output_package = (request.form.get("output_package") or "full").strip().lower()
+        json_only = (not use_ai) and output_package == "json_only"
         if use_ai:
             from config import load_config
             from extract import extract_pdf_to_excel
@@ -201,15 +204,18 @@ def extract():
                     max_pages=WEB_MAX_VL_PAGES,
                     overwrite=True,
                 )
-                sections = load_sections_from_json(json_path)
-                with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
-                    temp_xlsx = f.name
-                try:
-                    _write_sections_to_workbook(sections, Path(temp_xlsx))
-                    transform_extracted_to_qb(temp_xlsx, str(out_path))
-                finally:
-                    Path(temp_xlsx).unlink(missing_ok=True)
-                result = str(out_path)
+                if json_only:
+                    result = str(json_path)
+                else:
+                    sections = load_sections_from_json(json_path)
+                    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+                        temp_xlsx = f.name
+                    try:
+                        _write_sections_to_workbook(sections, Path(temp_xlsx))
+                        transform_extracted_to_qb(temp_xlsx, str(out_path))
+                    finally:
+                        Path(temp_xlsx).unlink(missing_ok=True)
+                    result = str(out_path)
             except ImportError:
                 log.exception("Hybrid extract: import failed")
                 flash("Hybrid extraction requires the vision stack (requirements-vl.txt).")
@@ -228,15 +234,18 @@ def extract():
                 from extract_vl import pdf_to_json_vl
 
                 pdf_to_json_vl(str(pdf_path), str(json_path), max_pages=WEB_MAX_VL_PAGES)
-                sections = load_sections_from_json(json_path)
-                with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
-                    temp_xlsx = f.name
-                try:
-                    _write_sections_to_workbook(sections, Path(temp_xlsx))
-                    transform_extracted_to_qb(temp_xlsx, str(out_path))
-                finally:
-                    Path(temp_xlsx).unlink(missing_ok=True)
-                result = str(out_path)
+                if json_only:
+                    result = str(json_path)
+                else:
+                    sections = load_sections_from_json(json_path)
+                    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+                        temp_xlsx = f.name
+                    try:
+                        _write_sections_to_workbook(sections, Path(temp_xlsx))
+                        transform_extracted_to_qb(temp_xlsx, str(out_path))
+                    finally:
+                        Path(temp_xlsx).unlink(missing_ok=True)
+                    result = str(out_path)
             except ImportError:
                 log.exception("VL extract: import failed")
                 flash("Vision model not available. Install requirements-vl.txt and run scripts/download_qwen2vl.py.")
@@ -251,7 +260,11 @@ def extract():
                 return redirect(url_for("index"))
         else:
             result = pdf_to_qb_excel(
-                str(pdf_path), str(out_path), overwrite=True, json_path_out=str(json_path)
+                str(pdf_path),
+                str(out_path),
+                overwrite=True,
+                json_path_out=str(json_path),
+                write_excel=not json_only,
             )
 
         if json_path and json_path.exists() and not use_ai:
@@ -273,12 +286,25 @@ def extract():
         if json_path and json_path.exists():
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                zf.write(result, f"{base_name}.xlsx")
-                zf.write(json_path, f"{base_name}.json")
-                if audit_report_path and audit_report_path.exists():
-                    zf.write(audit_report_path, f"{base_name}_audit_report.json")
+                if json_only:
+                    zf.write(json_path, f"{base_name}.json")
+                    if audit_report_path and audit_report_path.exists():
+                        zf.write(audit_report_path, f"{base_name}_audit_report.json")
+                else:
+                    zf.write(result, f"{base_name}.xlsx")
+                    zf.write(json_path, f"{base_name}.json")
+                    if audit_report_path and audit_report_path.exists():
+                        zf.write(audit_report_path, f"{base_name}_audit_report.json")
             buf.seek(0)
-            log.info("extract: sending zip with %s.xlsx and %s.json", base_name, base_name)
+            log.info(
+                "extract: sending zip (%s) for %s",
+                "json+audit" if json_only else "xlsx+json+audit",
+                base_name,
+            )
+            flash(
+                "Download started. If nothing appears, check blocked downloads or your Downloads folder.",
+                "success",
+            )
             return send_file(
                 buf,
                 as_attachment=True,
@@ -445,8 +471,9 @@ def json_to_excel_route():
             return redirect(url_for("index"))
         base_name = Path(file.filename).stem
         download_name = f"{base_name}.xlsx"
+        xlsx_bytes = out_xlsx.read_bytes()
         return send_file(
-            str(out_xlsx),
+            io.BytesIO(xlsx_bytes),
             as_attachment=True,
             download_name=download_name,
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -455,6 +482,303 @@ def json_to_excel_route():
         log.exception("json-to-excel: %s", e)
         flash(f"Error: {e}")
         return redirect(url_for("index"))
+    finally:
+        if tmp_dir and Path(tmp_dir).exists():
+            try:
+                for fp in Path(tmp_dir).iterdir():
+                    fp.unlink(missing_ok=True)
+                Path(tmp_dir).rmdir()
+            except OSError:
+                pass
+
+
+@app.route("/workflows")
+def workflows_page():
+    """Reference + forms for every pipeline exposed in the web UI (mirrors CLI where possible)."""
+    return render_template(
+        "workflows.html",
+        max_mb=_get_upload_limit_mb(),
+        ai_available=_ai_available(),
+        vl_available=_vl_available(),
+    )
+
+
+@app.route("/populate-template", methods=["POST"])
+def populate_template_route():
+    """PDF + user template .xlsx → filled template (same as: run.py populate-template)."""
+    if "pdf" not in request.files or "template" not in request.files:
+        flash("Upload a PDF and a template .xlsx.")
+        return redirect(url_for("workflows_page"))
+    pdf_f = request.files["pdf"]
+    tpl_f = request.files["template"]
+    if not pdf_f.filename or not tpl_f.filename:
+        flash("PDF and template are required.")
+        return redirect(url_for("workflows_page"))
+    if not pdf_f.filename.lower().endswith(".pdf"):
+        flash("First file must be a PDF.")
+        return redirect(url_for("workflows_page"))
+    if not tpl_f.filename.lower().endswith(".xlsx"):
+        flash("Template must be a .xlsx file.")
+        return redirect(url_for("workflows_page"))
+    account_id = (request.form.get("account_id") or "").strip() or None
+    tmp_dir = None
+    try:
+        tmp_dir = tempfile.mkdtemp()
+        pdf_path = Path(tmp_dir) / "upload.pdf"
+        tpl_path = Path(tmp_dir) / "template.xlsx"
+        out_path = Path(tmp_dir) / "populated.xlsx"
+        pdf_f.save(str(pdf_path))
+        tpl_f.save(str(tpl_path))
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            qb_tmp = f.name
+        try:
+            pdf_to_qb_excel(str(pdf_path), qb_tmp, overwrite=True)
+            populate_template_from_qb_output(
+                template_path=str(tpl_path),
+                qb_output_xlsx=qb_tmp,
+                output_path=str(out_path),
+                account_id=account_id,
+            )
+        finally:
+            Path(qb_tmp).unlink(missing_ok=True)
+        if not out_path.exists():
+            flash("Template population produced no file.")
+            return redirect(url_for("workflows_page"))
+        base = Path(pdf_f.filename).stem
+        xlsx_bytes = out_path.read_bytes()
+        return send_file(
+            io.BytesIO(xlsx_bytes),
+            as_attachment=True,
+            download_name=f"{base}_populated_template.xlsx",
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    except Exception as e:
+        log.exception("populate-template: %s", e)
+        flash(f"Error: {e}")
+        return redirect(url_for("workflows_page"))
+    finally:
+        if tmp_dir and Path(tmp_dir).exists():
+            try:
+                for fp in Path(tmp_dir).iterdir():
+                    fp.unlink(missing_ok=True)
+                Path(tmp_dir).rmdir()
+            except OSError:
+                pass
+
+
+@app.route("/populate-template-from-fields", methods=["POST"])
+def populate_template_from_fields_route():
+    """fields.json + template .xlsx → filled template (same as: run.py populate-template-from-fields)."""
+    if "fields_json" not in request.files or "template" not in request.files:
+        flash("Upload fields.json and a template .xlsx.")
+        return redirect(url_for("workflows_page"))
+    fj = request.files["fields_json"]
+    tpl_f = request.files["template"]
+    if not fj.filename or not tpl_f.filename:
+        flash("fields.json and template are required.")
+        return redirect(url_for("workflows_page"))
+    if not fj.filename.lower().endswith(".json"):
+        flash("fields file must be .json.")
+        return redirect(url_for("workflows_page"))
+    if not tpl_f.filename.lower().endswith(".xlsx"):
+        flash("Template must be a .xlsx file.")
+        return redirect(url_for("workflows_page"))
+    account_id = (request.form.get("account_id_fields") or "").strip() or None
+    tmp_dir = None
+    try:
+        tmp_dir = tempfile.mkdtemp()
+        fields_path = Path(tmp_dir) / "fields.json"
+        tpl_path = Path(tmp_dir) / "template.xlsx"
+        out_path = Path(tmp_dir) / "populated.xlsx"
+        fj.save(str(fields_path))
+        tpl_f.save(str(tpl_path))
+        populate_template_from_fields_json(
+            template_path=str(tpl_path),
+            fields_json_path=str(fields_path),
+            output_path=str(out_path),
+            account_id=account_id,
+        )
+        if not out_path.exists():
+            flash("Template population produced no file.")
+            return redirect(url_for("workflows_page"))
+        base = Path(tpl_f.filename).stem
+        xlsx_bytes = out_path.read_bytes()
+        return send_file(
+            io.BytesIO(xlsx_bytes),
+            as_attachment=True,
+            download_name=f"{base}_from_fields.xlsx",
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    except Exception as e:
+        log.exception("populate-template-from-fields: %s", e)
+        flash(f"Error: {e}")
+        return redirect(url_for("workflows_page"))
+    finally:
+        if tmp_dir and Path(tmp_dir).exists():
+            try:
+                for f in Path(tmp_dir).iterdir():
+                    f.unlink(missing_ok=True)
+                Path(tmp_dir).rmdir()
+            except OSError:
+                pass
+
+
+@app.route("/extract-fields", methods=["POST"])
+def extract_fields_route():
+    """PDF → fields.json (same as: run.py fields)."""
+    from openpyxl import load_workbook
+    from fields_from_qb_output import extract_fields as extract_fields_from_wb
+
+    if "pdf" not in request.files:
+        flash("No PDF uploaded.")
+        return redirect(url_for("workflows_page"))
+    pdf_f = request.files["pdf"]
+    if not pdf_f.filename or not pdf_f.filename.lower().endswith(".pdf"):
+        flash("Please upload a PDF.")
+        return redirect(url_for("workflows_page"))
+    tmp_dir = None
+    try:
+        tmp_dir = tempfile.mkdtemp()
+        pdf_path = Path(tmp_dir) / "upload.pdf"
+        pdf_f.save(str(pdf_path))
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            qb_tmp = f.name
+        try:
+            pdf_to_qb_excel(str(pdf_path), qb_tmp, overwrite=True)
+            wb = load_workbook(qb_tmp, data_only=True, read_only=True)
+            by_target = {
+                name: [(name, [list(r) for r in wb[name].iter_rows(values_only=True)])]
+                for name in wb.sheetnames
+            }
+            wb.close()
+            fields = extract_fields_from_wb(by_target)
+            payload = {"fields": [f.to_json() for f in fields]}
+        finally:
+            Path(qb_tmp).unlink(missing_ok=True)
+        buf = io.BytesIO(json.dumps(payload, indent=2).encode("utf-8"))
+        buf.seek(0)
+        base = Path(pdf_f.filename).stem
+        return send_file(
+            buf,
+            as_attachment=True,
+            download_name=f"{base}_fields.json",
+            mimetype="application/json",
+        )
+    except Exception as e:
+        log.exception("extract-fields: %s", e)
+        flash(f"Error: {e}")
+        return redirect(url_for("workflows_page"))
+    finally:
+        if tmp_dir and Path(tmp_dir).exists():
+            try:
+                for f in Path(tmp_dir).iterdir():
+                    f.unlink(missing_ok=True)
+                Path(tmp_dir).rmdir()
+            except OSError:
+                pass
+
+
+@app.route("/clean-json", methods=["POST"])
+def clean_json_route():
+    """Collapse repetitive sections in extraction JSON (same as: run.py clean-json)."""
+    from extract_vl import _drop_repetitive_sections, pdf_phrase_count_for_file
+
+    if "json_file" not in request.files:
+        flash("No JSON file.")
+        return redirect(url_for("workflows_page"))
+    jf = request.files["json_file"]
+    if not jf.filename or not jf.filename.lower().endswith(".json"):
+        flash("Please upload a .json extraction file.")
+        return redirect(url_for("workflows_page"))
+    tmp_dir = None
+    try:
+        tmp_dir = tempfile.mkdtemp()
+        json_path = Path(tmp_dir) / "input.json"
+        jf.save(str(json_path))
+        with open(json_path, encoding="utf-8") as f:
+            payload = json.load(f)
+        pdf_path = None
+        if "pdf" in request.files and request.files["pdf"].filename:
+            pdf_path = Path(tmp_dir) / "source.pdf"
+            request.files["pdf"].save(str(pdf_path))
+        if not pdf_path or not pdf_path.exists():
+            meta = payload.get("meta") or {}
+            if meta.get("pdf_path") and Path(meta["pdf_path"]).exists():
+                pdf_path = Path(meta["pdf_path"])
+            elif meta.get("pdf_name"):
+                candidate = json_path.parent / meta["pdf_name"]
+                if candidate.exists():
+                    pdf_path = candidate
+        pdf_phrase_count = None
+        if pdf_path and pdf_path.exists():
+            pdf_phrase_count = pdf_phrase_count_for_file(pdf_path)
+        sections = payload.get("sections") or []
+        if not sections:
+            flash("No sections in JSON to clean.")
+            return redirect(url_for("workflows_page"))
+        payload["sections"] = _drop_repetitive_sections(sections, pdf_phrase_count=pdf_phrase_count)
+        out_buf = io.BytesIO(json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8"))
+        out_buf.seek(0)
+        base = Path(jf.filename).stem
+        return send_file(
+            out_buf,
+            as_attachment=True,
+            download_name=f"{base}_cleaned.json",
+            mimetype="application/json",
+        )
+    except Exception as e:
+        log.exception("clean-json: %s", e)
+        flash(f"Error: {e}")
+        return redirect(url_for("workflows_page"))
+    finally:
+        if tmp_dir and Path(tmp_dir).exists():
+            try:
+                for f in Path(tmp_dir).iterdir():
+                    f.unlink(missing_ok=True)
+                Path(tmp_dir).rmdir()
+            except OSError:
+                pass
+
+
+@app.route("/audit-standalone", methods=["POST"])
+def audit_standalone_route():
+    """PDF + extraction JSON → full audit report JSON (same as: run.py audit-json)."""
+    if "pdf" not in request.files or "json_file" not in request.files:
+        flash("Upload a PDF and the extraction JSON.")
+        return redirect(url_for("workflows_page"))
+    pdf_f = request.files["pdf"]
+    jf = request.files["json_file"]
+    if not pdf_f.filename or not jf.filename:
+        flash("PDF and JSON are required.")
+        return redirect(url_for("workflows_page"))
+    if not pdf_f.filename.lower().endswith(".pdf"):
+        flash("First file must be a PDF.")
+        return redirect(url_for("workflows_page"))
+    max_pages_raw = (request.form.get("audit_max_pages") or "").strip()
+    max_pages = None
+    if max_pages_raw.isdigit():
+        max_pages = int(max_pages_raw)
+    tmp_dir = None
+    try:
+        tmp_dir = tempfile.mkdtemp()
+        pdf_path = Path(tmp_dir) / "source.pdf"
+        json_path = Path(tmp_dir) / "extraction.json"
+        pdf_f.save(str(pdf_path))
+        jf.save(str(json_path))
+        report = audit_pdf_vs_extraction_json(pdf_path, json_path, max_pages=max_pages)
+        buf = io.BytesIO(json.dumps(report, indent=2, ensure_ascii=False).encode("utf-8"))
+        buf.seek(0)
+        base = Path(jf.filename).stem
+        return send_file(
+            buf,
+            as_attachment=True,
+            download_name=f"{base}_audit_report.json",
+            mimetype="application/json",
+        )
+    except Exception as e:
+        log.exception("audit-standalone: %s", e)
+        flash(f"Error: {e}")
+        return redirect(url_for("workflows_page"))
     finally:
         if tmp_dir and Path(tmp_dir).exists():
             try:

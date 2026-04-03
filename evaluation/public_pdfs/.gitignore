@@ -1,0 +1,3 @@
+# Large / fetched PDFs — run scripts/download_eval_pdfs.sh locally
+*.pdf
+!generated_sample_report.pdf

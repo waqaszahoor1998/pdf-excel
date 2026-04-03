@@ -890,6 +890,8 @@ def pdf_to_qb_excel(
     output_path: str,
     overwrite: bool = True,
     json_path_out: str | Path | None = None,
+    *,
+    write_excel: bool = True,
 ) -> str:
     """
     Full pipeline: PDF → JSON (canonical) → Excel. JSON is the intermediate; Excel is built from it.
@@ -898,6 +900,8 @@ def pdf_to_qb_excel(
     2. Load sections from JSON; write raw Excel from it.
     3. Transform raw Excel to structured workbook (merge/rename sheets, colors).
     4. Save to output_path. Returns output_path.
+
+    If write_excel=False, stops after writing JSON (and validation logging); returns str(json_path).
 
     """
     import tempfile
@@ -915,7 +919,7 @@ def pdf_to_qb_excel(
     from hybrid_extract import library_routing_meta
 
     out_path = Path(output_path)
-    if out_path.exists() and not overwrite:
+    if write_excel and out_path.exists() and not overwrite:
         raise FileExistsError(f"Output exists: {out_path}")
 
     # 1. PDF → JSON (canonical intermediate); keep only table-like sections (no long prose)
@@ -946,6 +950,9 @@ def pdf_to_qb_excel(
             log.warning("validation: %s", err)
         if requires_review:
             log.warning("Output marked as Requires Review (see Validation Results sheet)")
+
+        if not write_excel:
+            return str(json_path)
 
         # 2. Build an extracted workbook (organized by TOC/headings), then transform it to QB format.
         # The QB transform is where PLSummary builders run.
