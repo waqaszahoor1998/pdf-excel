@@ -117,6 +117,7 @@ Open **http://127.0.0.1:8003**. Upload a PDF, then:
 
 - **Extract to Excel** — Uses pdfplumber (digital) or, if you check **“Use vision model”**, the VL pipeline (scanned). You get a ZIP with .xlsx and .json.
 - **Ask AI** — Requires `ANTHROPIC_API_KEY` in `.env`; sends the PDF to Anthropic for natural-language extraction.
+- **Family QB template (JPM + Goldman)** — Upload your empty `family_template.xlsx`, optional JP Morgan PDF, optional one-or-more Goldman PDFs; download a single filled workbook (same logic as `python run.py populate-family-template`).
 
 ### CLI
 

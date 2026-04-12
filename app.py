@@ -10,8 +10,10 @@ Default port is **8003** (see `.flaskenv` / `FLASK_RUN_PORT`; override with `--p
 Extraction: default uses pdfplumber + QB shaping. Choose hybrid (library + VL on
 difficult pages) or vision-only for scans; optional Ask AI uses Anthropic. After
 extraction, the first pages are audited vs the PDF; summary is in JSON meta and
-the ZIP may include a full audit report. No raw data is sent to any cloud service
-except Ask AI when that mode is used.
+the ZIP may include a full audit report. The home page also has **Family QB template**:
+upload empty family_template.xlsx plus optional JPM / Goldman PDFs → one filled workbook
+(POST `/populate-family-template`). No raw data is sent to any cloud service except
+Ask AI when that mode is used.
 """
 
 import io
@@ -455,6 +457,136 @@ def json_to_excel_route():
     except Exception as e:
         log.exception("json-to-excel: %s", e)
         flash(f"Error: {e}")
+        return redirect(url_for("index"))
+    finally:
+        if tmp_dir and Path(tmp_dir).exists():
+            try:
+                for f in Path(tmp_dir).iterdir():
+                    f.unlink(missing_ok=True)
+                Path(tmp_dir).rmdir()
+            except OSError:
+                pass
+
+
+def _parse_gs_account_list(gs_account_raw: str, n_pdfs: int) -> tuple[list[str | None] | None, str | None]:
+    """
+    Same rules as CLI --gs-account: one value for all, or comma list matching PDF count.
+    Returns (accounts, error_message).
+    """
+    raw = (gs_account_raw or "").strip()
+    if not raw:
+        return [None] * n_pdfs, None
+    parts = [x.strip() for x in raw.split(",") if x.strip()]
+    if len(parts) == n_pdfs:
+        return parts, None
+    if len(parts) == 1:
+        return [parts[0]] * n_pdfs, None
+    return (
+        None,
+        "Goldman account IDs: enter one value for all PDFs, or a comma-separated list with the same count as Goldman PDFs.",
+    )
+
+
+@app.route("/populate-family-template", methods=["POST"])
+def populate_family_template_route():
+    """
+    Upload empty family template (.xlsx) plus optional JPM PDF and/or one or more Goldman PDFs.
+    Returns one filled workbook (JPM blocks from PDF text; Goldman via PDF→QB→template).
+    """
+    from scripts.family_template_merge import populate_family_template
+
+    if "template" not in request.files:
+        flash("Choose your empty family template Excel file.", "error")
+        return redirect(url_for("index"))
+
+    tpl_file = request.files["template"]
+    if not tpl_file or not tpl_file.filename:
+        flash("Choose your empty family template Excel file.", "error")
+        return redirect(url_for("index"))
+
+    fn = tpl_file.filename.lower()
+    if not (fn.endswith(".xlsx") or fn.endswith(".xlsm")):
+        flash("Template must be .xlsx or .xlsm.", "error")
+        return redirect(url_for("index"))
+
+    jpm_upload = request.files.get("jpm_pdf")
+    jpm_ok = bool(
+        jpm_upload
+        and jpm_upload.filename
+        and jpm_upload.filename.lower().endswith(".pdf")
+    )
+    gs_uploads = [
+        f
+        for f in request.files.getlist("gs_pdfs")
+        if f and f.filename and f.filename.lower().endswith(".pdf")
+    ]
+
+    if not jpm_ok and not gs_uploads:
+        flash("Add at least one PDF: JP Morgan and/or Goldman (hold Ctrl/Cmd to select multiple Goldman files).", "error")
+        return redirect(url_for("index"))
+
+    gs_account_raw = (request.form.get("gs_account") or "").strip()
+    if gs_uploads:
+        accts, acct_err = _parse_gs_account_list(gs_account_raw, len(gs_uploads))
+        if acct_err:
+            flash(acct_err, "error")
+            return redirect(url_for("index"))
+    else:
+        accts = []
+
+    jpm_accounts = None
+    jpm_accounts_raw = (request.form.get("jpm_accounts") or "").strip()
+    if jpm_accounts_raw:
+        jpm_accounts = [x.strip() for x in jpm_accounts_raw.split(",") if x.strip()]
+
+    tmp_dir = None
+    try:
+        tmp_dir = tempfile.mkdtemp()
+        tdir = Path(tmp_dir)
+        tpl_path = tdir / "template.xlsx"
+        tpl_file.save(str(tpl_path))
+
+        jpm_path = None
+        if jpm_ok:
+            jpm_path = tdir / "jpm.pdf"
+            jpm_upload.save(str(jpm_path))
+
+        pairs: list[tuple[str, str | None]] = []
+        for i, g in enumerate(gs_uploads):
+            gp = tdir / f"gs_{i}.pdf"
+            g.save(str(gp))
+            pairs.append((str(gp), accts[i]))
+
+        out_path = tdir / "family_template_filled.xlsx"
+        log.info(
+            "populate-family-template: jpm=%s gs_count=%s",
+            bool(jpm_path),
+            len(pairs),
+        )
+        populate_family_template(
+            tpl_path,
+            out_path,
+            jpm_pdf=str(jpm_path) if jpm_path else None,
+            jpm_accounts=jpm_accounts,
+            gs_pdf_account_pairs=pairs or None,
+        )
+
+        if not out_path.exists():
+            flash("Template fill produced no file.", "error")
+            return redirect(url_for("index"))
+
+        buf = io.BytesIO(out_path.read_bytes())
+        buf.seek(0)
+        download = "family_template_filled.xlsx"
+        return send_file(
+            buf,
+            as_attachment=True,
+            download_name=download,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    except Exception as e:
+        log.exception("populate-family-template: %s", e)
+        flash(f"Template fill failed: {e}", "error")
         return redirect(url_for("index"))
     finally:
         if tmp_dir and Path(tmp_dir).exists():

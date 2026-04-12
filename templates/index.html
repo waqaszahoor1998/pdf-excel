@@ -34,7 +34,7 @@
     }
     .container {
       width: 100%;
-      max-width: 480px;
+      max-width: 560px;
     }
     h1 {
       font-size: 1.75rem;
@@ -111,6 +111,17 @@
       resize: vertical;
     }
     textarea::placeholder { color: var(--text-muted); }
+    input[type="text"] {
+      width: 100%;
+      padding: 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.9rem;
+      font-family: inherit;
+    }
+    input[type="text"]::placeholder { color: var(--text-muted); }
     .query-hint {
       font-size: 0.8rem;
       color: var(--text-muted);
@@ -251,6 +262,35 @@
       </div>
     </form>
 
+    <form action="{{ url_for('populate_family_template_route') }}" method="post" enctype="multipart/form-data" class="card" id="familyTplForm">
+      <h2 style="font-size: 1.1rem; margin: 0 0 0.5rem 0; font-weight: 600;">Family QB template (JPM + Goldman)</h2>
+      <p class="query-hint" style="margin-top: 0; margin-bottom: 1rem;">Upload your <strong>empty</strong> family template (.xlsx), then add a JP Morgan PDF, Goldman PDF(s), or both. You get <strong>one</strong> filled workbook (same flow as <code style="font-size:0.85em;">run.py populate-family-template</code>). Goldman statements run through PDF→QB extraction first; large uploads count toward the {{ max_mb }} MB limit.</p>
+      <div class="form-group">
+        <label for="familyTemplate">Empty template (.xlsx)</label>
+        <input type="file" name="template" id="familyTemplate" accept=".xlsx,.xlsm" required>
+      </div>
+      <div class="form-group">
+        <label for="jpmPdf">JP Morgan PDF (optional)</label>
+        <input type="file" name="jpm_pdf" id="jpmPdf" accept=".pdf">
+      </div>
+      <div class="form-group">
+        <label for="jpmAccounts">JPM account blocks (optional)</label>
+        <input type="text" name="jpm_accounts" id="jpmAccounts" placeholder="e.g. 1004,9004 — leave blank for all blocks">
+      </div>
+      <div class="form-group">
+        <label for="gsPdfs">Goldman PDF(s) (optional)</label>
+        <input type="file" name="gs_pdfs" id="gsPdfs" accept=".pdf" multiple>
+        <p class="limit">Select multiple files in one go (Ctrl/Cmd+click) if you have several statements.</p>
+      </div>
+      <div class="form-group">
+        <label for="gsAccount">Goldman template account ID(s) (optional)</label>
+        <input type="text" name="gs_account" id="gsAccount" placeholder="One id for all PDFs, or comma list matching each Goldman PDF">
+      </div>
+      <div class="form-group">
+        <button type="submit" class="btn btn-primary" id="familyTplSubmit">Fill template &amp; download Excel</button>
+      </div>
+    </form>
+
   </div>
 
   <script>
@@ -336,6 +376,15 @@
         pdfJsonForm.addEventListener('submit', function() {
           pdfJsonSubmit.disabled = true;
           pdfJsonSubmit.textContent = 'Extracting…';
+        });
+      }
+
+      var familyTplForm = document.getElementById('familyTplForm');
+      var familyTplSubmit = document.getElementById('familyTplSubmit');
+      if (familyTplForm && familyTplSubmit) {
+        familyTplForm.addEventListener('submit', function() {
+          familyTplSubmit.disabled = true;
+          familyTplSubmit.textContent = 'Filling template…';
         });
       }
     })();
