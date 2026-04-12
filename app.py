@@ -5,7 +5,8 @@ Web UI for PDF → Excel (local only, no cloud LLM).
 Run: flask --app app run
 Or:  python app.py
 
-Then open http://127.0.0.1:5000 — upload a PDF, get all tables as Excel.
+Then open http://127.0.0.1:8003 — upload a PDF, get all tables as Excel.
+Default port is **8003** (see `.flaskenv` / `FLASK_RUN_PORT`; override with `--port`).
 Extraction: default uses pdfplumber + QB shaping. Choose hybrid (library + VL on
 difficult pages) or vision-only for scans; optional Ask AI uses Anthropic. After
 extraction, the first pages are audited vs the PDF; summary is in JSON meta and
@@ -466,4 +467,6 @@ def json_to_excel_route():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    _port = int(os.environ.get("FLASK_RUN_PORT", "8003"))
+    _host = os.environ.get("FLASK_RUN_HOST", "127.0.0.1")
+    app.run(debug=True, host=_host, port=_port)

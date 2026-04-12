@@ -351,6 +351,52 @@ def _clean_table_rows(rows: list) -> list[list]:
     return _drop_empty_rows(merged)
 
 
+def _align_ragged_matrix(rows: list) -> tuple[list[list], list[str]]:
+    """
+    Pad or truncate every row to a common width so JSON/Excel validation passes.
+
+    Width = max column count across rows (handles ragged headers and Tabula/Camelot splits).
+    Short rows: pad with "" on the right (subsection titles, label-only rows).
+    Long rows: truncate to width with a warning (rare; avoids hard failures).
+
+    Returns (aligned_rows, warnings).
+    """
+    warnings: list[str] = []
+    if not rows:
+        return [], warnings
+    norm: list[list] = []
+    for r in rows:
+        row = list(r) if isinstance(r, (list, tuple)) else [r]
+        norm.append(row)
+    width = max((len(row) for row in norm), default=0)
+    if width <= 0:
+        return [], warnings
+    out: list[list] = []
+    for i, row in enumerate(norm):
+        if len(row) < width:
+            out.append(row + [""] * (width - len(row)))
+            warnings.append(f"row_index={i}: padded {len(row)}->{width}")
+        elif len(row) > width:
+            out.append(row[:width])
+            warnings.append(f"row_index={i}: truncated {len(row)}->{width}")
+        else:
+            out.append(row)
+    return out, warnings
+
+
+def _finalize_section_tuple_data_rows(sections: list[tuple]) -> list[tuple]:
+    """Apply _align_ragged_matrix to each section's data rows. Preserves 4-tuple page numbers."""
+    out: list[tuple] = []
+    for s in sections:
+        name, heading_rows, data_rows = s[0], s[1], s[2]
+        aligned, _warns = _align_ragged_matrix(data_rows or [])
+        if len(s) >= 4:
+            out.append((name, heading_rows, aligned, s[3]))
+        else:
+            out.append((name, heading_rows, aligned))
+    return out
+
+
 def _split_table_by_section_titles(rows: list[list]) -> list[tuple[str, list[list]]]:
     """
     If the table has rows that look like section titles (e.g. Asset Allocation, Portfolio Activity, Tax Summary),
@@ -1353,6 +1399,11 @@ def extract_sections_from_pdf(pdf_path: str, max_pages: int | None = None) -> li
             best_name = name
             best_sections = secs
     log.info("Extractor comparison: %s selected (score=%.0f)", best_name, best_score)
+    # Diagnostics for JSON meta (pdf_to_json); safe no-op if attribute missing.
+    extract_sections_from_pdf._last_extraction_meta = {
+        "extractor_selected": best_name,
+        "extractor_score": float(best_score),
+    }
     if max_pages is not None:
 
         def _page_within_cap(s: tuple) -> bool:
@@ -1367,7 +1418,7 @@ def extract_sections_from_pdf(pdf_path: str, max_pages: int | None = None) -> li
                 return True
 
         best_sections = [s for s in best_sections if _page_within_cap(s)]
-    return best_sections
+    return _finalize_section_tuple_data_rows(best_sections)
 
 
 def _cell_to_json(c):
@@ -1543,20 +1594,49 @@ def filter_sections_to_tables_only(sections: list[tuple]) -> list[tuple]:
     return out
 
 
+def _group_json_sections_by_page(sections: list[dict]) -> dict[str, list[dict]]:
+    """Group section dicts by PDF page (1-based string keys); unknown page -> '_'."""
+    from collections import defaultdict
+
+    by_page: dict[str, list[dict]] = defaultdict(list)
+    for sec in sections:
+        if not isinstance(sec, dict):
+            continue
+        p = sec.get("page")
+        key = str(int(p)) if isinstance(p, int) or (isinstance(p, str) and str(p).isdigit()) else "_"
+        by_page[key].append(sec)
+
+    def _sort_key(k: str) -> tuple[int, str]:
+        if k == "_":
+            return (10_000, k)
+        try:
+            return (int(k), k)
+        except ValueError:
+            return (9999, k)
+
+    return {k: by_page[k] for k in sorted(by_page.keys(), key=_sort_key)}
+
+
 def _write_json_from_sections(
     sections: list[tuple],
     out: Path,
     overwrite: bool = True,
     meta: dict | None = None,
+    *,
+    refine_sections: bool = True,
+    group_by_page: bool = False,
 ) -> None:
     """Write sections to a JSON file (used for one-stream Excel + JSON output)."""
     if out.exists() and not overwrite:
         return
     out.parent.mkdir(parents=True, exist_ok=True)
-    # Serialize and refine to reduce narrative noise and improve downstream usability.
+    # Serialize and optionally refine to reduce narrative noise and improve downstream usability.
     payload_sections = _sections_to_json_serializable(sections)
-    payload_sections = refine_json_sections(payload_sections)
+    if refine_sections:
+        payload_sections = refine_json_sections(payload_sections)
     payload = {"sections": payload_sections}
+    if group_by_page:
+        payload["pages"] = _group_json_sections_by_page(payload_sections)
     payload["meta"] = meta if isinstance(meta, dict) else {}
     try:
         evaluation = evaluate_extraction_json_correctness(payload)
@@ -1574,7 +1654,7 @@ def _write_json_from_sections(
         pass
     with open(out, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
-    log.info("Wrote %d section(s) to %s", len(sections), out)
+    log.info("Wrote %d section(s) to %s", len(payload_sections), out)
     for s in sections:
         log.debug("json section=%s rows=%d", (s[0] or "")[:50], len((s[2] or [])))
 
@@ -1708,7 +1788,23 @@ def evaluate_extraction_json_correctness(
             errors.append(f"section={sec_name[:60]!r}: rows missing or not a list")
             continue
 
+        # Pad/truncate ragged rows (broker statements, Tabula/Camelot, VL) before tally checks.
+        aligned, _align_fixes = _align_ragged_matrix(rows)
+        sec["rows"] = aligned
+        rows = aligned
         row_count_actual = len(rows)
+        sec["row_count"] = row_count_actual
+        sec["column_count"] = len(rows[0]) if rows else 0
+        grid = _build_header_grid(rows)
+        if grid:
+            sec["column_headers"] = grid["column_headers"]
+            sec["row_headers"] = grid["row_headers"]
+            sec["data"] = grid["data"]
+        else:
+            sec.pop("column_headers", None)
+            sec.pop("row_headers", None)
+            sec.pop("data", None)
+
         if row_count_actual == 0:
             # Not necessarily wrong (some documents have empty sections),
             # but flag for review.
@@ -1888,8 +1984,9 @@ def validate_sections(
         sec_name, _headings, data_rows = s[0], s[1], s[2]
         if not data_rows:
             continue
-        header_len = len(data_rows[0]) if data_rows[0] else 0
-        for i, row in enumerate(data_rows[1:], start=1):
+        aligned, _ = _align_ragged_matrix(data_rows)
+        header_len = len(aligned[0]) if aligned and aligned[0] else 0
+        for i, row in enumerate(aligned[1:], start=1):
             row_len = len(row) if isinstance(row, (list, tuple)) else 0
             if header_len and row_len != header_len:
                 err = f"section={sec_name[:40]!r} row={i+1} column_count={row_len} != header_count={header_len}"
@@ -1911,6 +2008,7 @@ def _clean_loaded_sections(sections: list[tuple]) -> list[tuple]:
         for r in data_rows or []:
             row = r if isinstance(r, (list, tuple)) else [r]
             clean_rows.append([_clean_loaded_cell(c) for c in row])
+        clean_rows, _ = _align_ragged_matrix(clean_rows)
         if len(s) >= 4:
             out.append((name, clean_headings, clean_rows, s[3]))
         else:
@@ -2147,10 +2245,34 @@ def json_to_excel(
     return str(out)
 
 
+def _page_text_preview_for_pdf(pdf_path: Path, *, max_chars_per_page: int = 800) -> dict[str, str]:
+    """First N characters of each page's text (PyMuPDF), for auditing / gap analysis."""
+    try:
+        import fitz  # PyMuPDF
+    except Exception:
+        return {}
+    out: dict[str, str] = {}
+    try:
+        with fitz.open(str(pdf_path)) as doc:
+            for i in range(len(doc)):
+                t = (doc.load_page(i).get_text("text") or "").strip()
+                if max_chars_per_page > 0 and len(t) > max_chars_per_page:
+                    t = t[:max_chars_per_page] + "…"
+                out[str(i + 1)] = t
+    except Exception:
+        return {}
+    return out
+
+
 def pdf_to_json(
     pdf_path: str,
     output_path: str | None = None,
     overwrite: bool = True,
+    *,
+    refine_sections: bool = True,
+    page_text_preview: bool = False,
+    page_text_preview_chars: int = 800,
+    group_by_page: bool = False,
 ) -> str:
     """
     Extract all tables/sections from the PDF and write them to a JSON file.
@@ -2171,18 +2293,46 @@ def pdf_to_json(
             page_count = len(doc)
     except Exception:
         page_count = None
+
+    ext_meta = getattr(extract_sections_from_pdf, "_last_extraction_meta", None)
+    if not isinstance(ext_meta, dict):
+        ext_meta = {}
+
+    from collections import Counter
+
+    per_page = Counter()
+    for s in sections:
+        if len(s) >= 4 and s[3] is not None:
+            try:
+                per_page[int(s[3])] += 1
+            except (TypeError, ValueError):
+                pass
+
     out.parent.mkdir(parents=True, exist_ok=True)
+    meta: dict = {
+        "pdf_name": pdf_path.name,
+        "pdf_path": str(pdf_path),
+        "page_count": page_count,
+        "section_count": len(sections),
+        "sections_per_page": {str(k): per_page[k] for k in sorted(per_page.keys())},
+        "json_refine_sections": bool(refine_sections),
+        "json_group_by_page": bool(group_by_page),
+        "generated_at_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "generator": "tables_to_excel.pdf_to_json",
+    }
+    meta.update(ext_meta)
+    if page_text_preview:
+        meta["page_text_preview"] = _page_text_preview_for_pdf(
+            pdf_path, max_chars_per_page=max(0, int(page_text_preview_chars))
+        )
+
     _write_json_from_sections(
         sections,
         out,
         overwrite,
-        meta={
-            "pdf_name": pdf_path.name,
-            "pdf_path": str(pdf_path),
-            "page_count": page_count,
-            "generated_at_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-            "generator": "tables_to_excel.pdf_to_json",
-        },
+        meta=meta,
+        refine_sections=refine_sections,
+        group_by_page=group_by_page,
     )
     return str(out)
 

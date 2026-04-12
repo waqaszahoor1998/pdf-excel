@@ -5,7 +5,7 @@ This doc describes the **target Excel structure** the extractor aims for: one sh
 ## How to use
 
 1. **Web app**  
-   Run `flask --app app run` (or `python app.py`), open http://127.0.0.1:5000, upload your PDF.  
+   Run `flask --app app run` (or `python app.py`), open http://127.0.0.1:8003, upload your PDF.  
    - **Raw extraction**: one sheet per section (good for checking what was extracted).  
    - **Structured workbook**: merged sheets by type and by account (e.g. Period Summary, Asset Allocation, Portfolio Activity, Tax Summary, per-account sheets, Broker Info). Use this for downstream workflows, reporting, or APIs.
 

@@ -1,0 +1,212 @@
+# Template label coverage report
+
+- **Template**: `/Users/m.w.zahoor/Downloads/family_template.xlsx`
+- **Extraction JSON**: `output/XXXXX3663_extraction.json`
+- **Template labels scanned**: 327 (column A across sheets)
+- **Matched labels**: 0
+- **Missing labels**: 327
+
+## Matched (where the template label appears in the PDF extraction)
+
+## Missing (template labels not found in extraction)
+
+- `Change in Dividend` row 10: REVOCABLE TRUST
+- `Change in Dividend` row 12: Changes in Accrued Dividend
+- `Change in Dividend` row 14: GOLDMAN SACHS
+- `Change in Dividend` row 18: Accrued Dividend
+- `Change in Dividend` row 20: Change in Accrued Dividend
+- `Change in Dividend` row 24: Accrued Dividend
+- `Change in Dividend` row 26: Change in Accrued Dividend
+- `Change in Dividend` row 30: Accrued Dividend
+- `Change in Dividend` row 32: Change in Accrued Dividend
+- `Change in Dividend` row 36: Accrued Dividend
+- `Change in Dividend` row 38: Change in Accrued Dividend
+- `Change in Dividend` row 42: Accrued Dividend
+- `Change in Dividend` row 44: Change in Accrued Dividend
+- `Change in Dividend` row 48: Accrued Dividend
+- `Change in Dividend` row 50: Change in Accrued Dividend
+- `Change in Dividend` row 54: Accrued Dividend
+- `Change in Dividend` row 56: Change in Accrued Dividend
+- `Change in Dividend` row 60: Accrued Dividend
+- `Change in Dividend` row 62: Change in Accrued Dividend
+- `Change in Dividend` row 66: Accrued Dividend
+- `Change in Dividend` row 68: Change in Accrued Dividend
+- `Change in Dividend` row 72: Accrued Dividend
+- `Change in Dividend` row 74: Change in Accrued Dividend
+- `Change in Dividend` row 78: Accrued Dividend
+- `Change in Dividend` row 80: Change in Accrued Dividend
+- `Change in Dividend` row 84: Accrued Interest
+- `Change in Dividend` row 86: Change in Accrued Interest
+- `Change in Dividend` row 89: Total Change in Accrued Dividend Goldman
+- `Change in Dividend` row 92: JP Morgan Chase
+- `Change in Dividend` row 95: E79271004
+- `Change in Dividend` row 97: Accrued Dividend
+- `Change in Dividend` row 99: Change in Accrued Dividend
+- `Change in Dividend` row 104: Accrued Dividend
+- `Change in Dividend` row 106: Change in Accrued Dividend
+- `Change in Dividend` row 109: G41269004
+- `Change in Dividend` row 111: Accrued Dividend
+- `Change in Dividend` row 113: Change in Accrued Dividend
+- `Change in Dividend` row 116: G46378008
+- `Change in Dividend` row 118: Accrued Dividend
+- `Change in Dividend` row 120: Change in Accrued Dividend
+- `Change in Dividend` row 123: Total Change in Accrued Dividend JP Morgan
+- `Change in Dividend` row 127: Wells Fargo
+- `Change in Dividend` row 131: Accrued Dividend
+- `Change in Dividend` row 133: Change in Accrued Dividend
+- `Change in Dividend` row 138: Accrued Dividend
+- `Change in Dividend` row 140: Change in Accrued Dividend
+- `Change in Dividend` row 144: Total Change in Accrued Dividend Wells Fargo
+- `Change in Dividend` row 147: Total Change in Accrued Income Consolidated
+- `Change in Interest` row 10: REVOCABLE TRUST
+- `Change in Interest` row 12: Changes in Accrued Interest
+- `Change in Interest` row 14: GOLDMAN SACHS
+- `Change in Interest` row 42: Accrued Interest
+- `Change in Interest` row 44: Change in Accrued Interest
+- `Change in Interest` row 60: Accrued Interest
+- `Change in Interest` row 62: Change in Accrued Interest
+- `Change in Interest` row 66: Accrued Interest
+- `Change in Interest` row 68: Change in Accrued Interest
+- `Change in Interest` row 72: Accrued Interest
+- `Change in Interest` row 74: Change in Accrued Interest
+- `Change in Interest` row 78: Accrued Interest
+- `Change in Interest` row 80: Change in Accrued Interest
+- `Change in Interest` row 84: Accrued Interest
+- `Change in Interest` row 86: Change in Accrued Interest
+- `Change in Interest` row 90: Accrued Interest
+- `Change in Interest` row 92: Change in Accrued Interest
+- `Change in Interest` row 96: Accrued Interest
+- `Change in Interest` row 98: Change in Accrued Interest
+- `Change in Interest` row 101: Total Change in Accrued Interest Goldman
+- `Change in Interest` row 104: JP Morgan Chase
+- `Change in Interest` row 107: E79271004
+- `Change in Interest` row 109: Accrued Interest
+- `Change in Interest` row 111: Change in Accrued Interest
+- `Change in Interest` row 116: Accrued Interest
+- `Change in Interest` row 118: Change in Accrued Interest
+- `Change in Interest` row 121: G41269004
+- `Change in Interest` row 123: Accrued Interest
+- `Change in Interest` row 125: Change in Accrued Interest
+- `Change in Interest` row 128: G46378008
+- `Change in Interest` row 130: Accrued Interest
+- `Change in Interest` row 132: Change in Accrued Interest
+- `Change in Interest` row 135: Total Change in Accrued Interest JP Morgan
+- `Change in Interest` row 139: Wells Fargo
+- `Change in Interest` row 143: Accrued Interest
+- `Change in Interest` row 145: Change in Accrued Interest
+- `Change in Interest` row 150: Accrued Interest
+- `Change in Interest` row 152: Change in Accrued Interest
+- `Change in Interest` row 157: Accrued Interest
+- `Change in Interest` row 159: Change in Accrued Interest
+- `Change in Interest` row 164: Total Change in Accrued Interest Wells Fargo
+- `Change in Interest` row 167: Total Change in Accrued Income Consolidated
+- `Net Assets` row 10: REVOCABLE TRUST
+- `Net Assets` row 12: STATEMENT OF NET ASSETS    | As of  01/31/2026
+- `Net Assets` row 14: Description
+- `Net Assets` row 16: Assets
+- `Net Assets` row 17: Cash & Cash Equivalents
+- `Net Assets` row 18: Investment in Securities
+- `Net Assets` row 19: Other Investments- Wines
+- `Net Assets` row 20: Accrued Interest and dividend
+- `Net Assets` row 23: Total Assets
+- `Net Assets` row 25: Liabilities
+- `Net Assets` row 26: Securities sold short
+- `Net Assets` row 27: Total  Liabilities
+- `Net Assets` row 28: Total Net Assets
+- `Operations ` row 10: REVOCABLE TRUST
+- `Operations ` row 12: STATEMENT OF OPERATIONS | Reporting Period: 01/01/2026 to 01/31/2026
+- `Operations ` row 14: Financial Account
+- `Operations ` row 16: Revenues
+- `Operations ` row 17: Interest Income
+- `Operations ` row 18: Dividend Income
+- `Operations ` row 19: Expenses
+- `Operations ` row 21: Broker Fees
+- `Operations ` row 22: Account Fee
+- `Operations ` row 23: Management Fees
+- `Operations ` row 24: Interest Expenses
+- `Operations ` row 25: Net Investment Income/(Loss)
+- `Operations ` row 27: Realized and Unrealized Gain / (Loss) on  Investments
+- `Operations ` row 28: Change in Unrealized Gain/(Loss)
+- `Operations ` row 29: Long-term Realized Gain /(Loss)
+- `Operations ` row 30: Short-term Realized Gain /(Loss)
+- `Operations ` row 31: Net Income/(Loss)
+- `PLSummary` row 1: MTD PNL Per Trading Account Summary
+- `PLSummary` row 2: Consolidated
+- `PLSummary` row 6: Account Name
+- `PLSummary` row 7: Investments
+- `PLSummary` row 9: Cash and cash equivalents
+- `PLSummary` row 11: Totals
+- `PLSummary` row 12: Accrued Dividend
+- `PLSummary` row 13: Accrued Interest
+- `PLSummary` row 14: Account Fees
+- `PLSummary` row 15: Broker fees
+- `PLSummary` row 16: Change in unrealized gain/loss
+- `PLSummary` row 17: Dividend Income
+- `PLSummary` row 18: Franchise Tax
+- `PLSummary` row 19: Interest expense
+- `PLSummary` row 20: Interest Income
+- `PLSummary` row 21: Long term realized gain/loss
+- `PLSummary` row 22: Other income
+- `PLSummary` row 23: Short term realized gain/loss
+- `PLSummary` row 24: Withholding taxes
+- `PLSummary` row 27: Balance Sheet
+- `PLSummary` row 28: Accrued Interest and dividend
+- `PLSummary` row 29: Cash - Due from Broker
+- `PLSummary` row 30: Investment in Securities
+- `PLSummary` row 34: Securities sold short
+- `PLSummary` row 35: Opening Capital
+- `PLSummary` row 36: Capital Contribution
+- `PLSummary` row 37: Capital Withdrwal
+- `PLSummary` row 38: Retained Earning
+- `PLSummary` row 39: Accrued Expense
+- `PLSummary` row 40: Net Income
+- `PLSummary` row 42: Total Liabilities
+- `PLSummary` row 44: Difference
+- `PLSummary Admin GS ` row 1: MTD PNL Per Trading Account Summary
+- `PLSummary Admin GS ` row 2: Goldman - Consolidated
+- `PLSummary Admin GS ` row 7: Account Name
+- `PLSummary Admin GS ` row 8: Investments
+- `PLSummary Admin GS ` row 10: Cash and cash equivalents
+- `PLSummary Admin GS ` row 13: Totals
+- `PLSummary Admin GS ` row 14: Change in Accrued Dividend
+- `PLSummary Admin GS ` row 15: Change in Accrued Interest
+- `PLSummary Admin GS ` row 16: Account Fee
+- `PLSummary Admin GS ` row 17: Broker fees
+- `PLSummary Admin GS ` row 18: Change in unrealized gain/loss
+- `PLSummary Admin GS ` row 19: Dividend Income
+- `PLSummary Admin GS ` row 20: Franchise Tax
+- `PLSummary Admin GS ` row 21: Interest expense
+- `PLSummary Admin GS ` row 22: Interest Income
+- `PLSummary Admin GS ` row 23: Long term realized gain/loss
+- `PLSummary Admin GS ` row 24: Other income
+- `PLSummary Admin GS ` row 25: Short term realized gain/loss
+- `PLSummary Admin GS ` row 26: Withholding taxes
+- `PLSummary Admin GS ` row 29: Balance Sheet
+- `PLSummary Admin GS ` row 30: Accrued Interest and dividend
+- `PLSummary Admin GS ` row 31: Cash - Due from Broker
+- `PLSummary Admin GS ` row 32: Investment in Securities
+- `PLSummary Admin GS ` row 36: Securities sold short
+- `PLSummary Admin GS ` row 37: Opening Capital
+- `PLSummary Admin GS ` row 38: Capital Contribution
+- `PLSummary Admin GS ` row 39: Capital Withdrwal
+- `PLSummary Admin GS ` row 40: Retained Earning
+- `PLSummary Admin GS ` row 41: Accrued Expense
+- `PLSummary Admin GS ` row 42: Net Income
+- `PLSummary Admin GS ` row 43: Total Liabilities
+- `PLSummary Admin GS ` row 45: Difference
+- `PLSummary JP Morgan Chase` row 1: MTD PNL Per Trading Account Summary
+- `PLSummary JP Morgan Chase` row 2: JP Morgan Chase
+- `PLSummary JP Morgan Chase` row 7: Account Name
+- `PLSummary JP Morgan Chase` row 8: Investments
+- `PLSummary JP Morgan Chase` row 10: Cash and cash equivalents
+- `PLSummary JP Morgan Chase` row 12: Totals
+- `PLSummary JP Morgan Chase` row 13: Accrued Dividend
+- `PLSummary JP Morgan Chase` row 14: Accrued Interest
+- `PLSummary JP Morgan Chase` row 15: Accounting Fees
+- `PLSummary JP Morgan Chase` row 16: Broker fees
+- `PLSummary JP Morgan Chase` row 17: Change in unrealized gain/loss
+- `PLSummary JP Morgan Chase` row 18: Dividend Income
+- `PLSummary JP Morgan Chase` row 19: Franchise Tax
+- `PLSummary JP Morgan Chase` row 20: Interest expense
+- `PLSummary JP Morgan Chase` row 21: Interest Income
+- `PLSummary JP Morgan Chase` row 22: Long term realized gain/loss

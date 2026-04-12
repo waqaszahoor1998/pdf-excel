@@ -35,7 +35,7 @@ python run.py from-json output\report.json -o output\report.xlsx
 ```powershell
 flask --app app run
 ```
-Open http://127.0.0.1:5000 → upload PDF → Extract to Excel.
+Open http://127.0.0.1:8003 → upload PDF → Extract to Excel (port from `.flaskenv`; override with `FLASK_RUN_PORT` or `flask --port`).
 
 ---
 
@@ -126,7 +126,7 @@ Or run the web app:
 ```powershell
 flask --app app run
 ```
-Then open http://127.0.0.1:5000 and upload a PDF.
+Then open http://127.0.0.1:8003 and upload a PDF.
 
 **Optional:** Copy `.env.example` to `.env` if they want to change `OUTPUT_DIR` or use Ask AI (then they need `ANTHROPIC_API_KEY`).
 
@@ -172,7 +172,7 @@ If they need to process **scanned** PDFs (images of pages), they need the VL mod
 1. Python 3.10+, project folder
 2. venv + pip install -r requirements.txt
 3. python run.py tables yourfile.pdf   → output\yourfile.xlsx and .json
-   OR: flask --app app run → http://127.0.0.1:5000 → upload PDF
+   OR: flask --app app run → http://127.0.0.1:8003 → upload PDF
 ```
 
 **Scanned PDFs (VL):**

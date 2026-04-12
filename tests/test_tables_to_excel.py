@@ -6,6 +6,7 @@ from decimal import Decimal
 from tables_to_excel import (
     _merge_fragmented_row,
     _clean_table_rows,
+    _align_ragged_matrix,
     _cell_value,
     validate_extraction_json,
     evaluate_extraction_json_correctness,
@@ -129,6 +130,21 @@ class TestValidateExtractionJson:
             validate_extraction_json(payload)
 
 
+class TestAlignRaggedMatrix:
+    def test_pads_short_rows(self):
+        rows = [["A", "B"], ["x"], ["y", "z"]]
+        out, w = _align_ragged_matrix(rows)
+        assert out == [["A", "B"], ["x", ""], ["y", "z"]]
+        assert w  # padding occurred
+
+    def test_max_width_expands_short_header_row(self):
+        """Width is max across rows so a title-only first row still aligns with wide data."""
+        rows = [["A"], ["b", "c", "d"]]
+        out, _w = _align_ragged_matrix(rows)
+        assert len(out[0]) == 3 and len(out[1]) == 3
+        assert out[0] == ["A", "", ""]
+
+
 class TestEvaluateExtractionJsonCorrectness:
     def test_good_payload_is_ok(self):
         payload = {
@@ -157,7 +173,8 @@ class TestEvaluateExtractionJsonCorrectness:
         assert out["requires_review"] is False
         assert out["errors"] == []
 
-    def test_row_width_mismatch_is_failed(self):
+    def test_row_width_mismatch_is_normalized_to_ok(self):
+        """Ragged rows are padded to common width; validation should pass."""
         payload = {
             "sections": [
                 {
@@ -165,7 +182,7 @@ class TestEvaluateExtractionJsonCorrectness:
                     "headings": [],
                     "rows": [
                         ["", "C1", "C2"],
-                        ["R1", 1],  # wrong width
+                        ["R1", 1],  # padded to 3 cols
                         ["R2", 3, 4],
                     ],
                     "row_count": 3,
@@ -174,11 +191,12 @@ class TestEvaluateExtractionJsonCorrectness:
             ]
         }
         out = evaluate_extraction_json_correctness(payload)
-        assert out["status"] == "failed"
-        assert out["requires_review"] is True
-        assert out["errors"]
+        assert out["status"] == "ok"
+        assert out["errors"] == []
+        assert payload["sections"][0]["rows"][1] == ["R1", 1, ""]
 
-    def test_grid_cell_mismatch_is_failed(self):
+    def test_stale_header_grid_is_rebuilt_from_rows(self):
+        """Precomputed column_headers/data must match `rows`; validator rebuilds grid from aligned rows."""
         payload = {
             "sections": [
                 {
@@ -194,15 +212,17 @@ class TestEvaluateExtractionJsonCorrectness:
                     "column_headers": ["", "C1", "C2"],
                     "row_headers": ["R1", "R2"],
                     "data": [
-                        [1, 999, None],  # wrong cell for C2 on R1
+                        [1, 999, None],  # stale vs rows (999 should be 2)
                         [3, 4, None],
                     ],
                 }
             ]
         }
         out = evaluate_extraction_json_correctness(payload)
-        assert out["status"] == "failed"
-        assert out["errors"]
+        assert out["status"] == "ok"
+        assert out["errors"] == []
+        # Grid rewritten to match `rows` matrix
+        assert payload["sections"][0]["data"][0][1] == 2
 
 
 def test_pdf_json_audit_helpers_flatten_and_invented():

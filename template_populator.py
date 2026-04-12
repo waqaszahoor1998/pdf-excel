@@ -434,16 +434,15 @@ def _apply_template_fills(
         _set_admin_block_value("Change in Accrued Dividend", accrued_dividend_change_written)
 
 
-def populate_template_from_qb_output(
-    template_path: str | Path,
-    qb_output_xlsx: str | Path,
-    output_path: str | Path,
+def apply_template_from_qb_workbook(
+    wb_tpl,
+    wb_src,
     account_id: str | None = None,
 ) -> str:
-    wb_src = load_workbook(qb_output_xlsx, data_only=True)
-    # PLSummary is preferred (it standardizes many values), but not every PDF/QB build
-    # yields a PLSummary sheet. For unattended service behavior we must not crash; we
-    # populate what we can (holdings totals, dates, account id) and leave the rest blank.
+    """
+    Fill Goldman / admin template sheets from an already-open QB-format workbook.
+    Mutates wb_tpl in place. Returns inferred account id used.
+    """
     if "PLSummary" in wb_src.sheetnames:
         src_map = _extract_source_label_map(wb_src["PLSummary"])
     else:
@@ -452,7 +451,6 @@ def populate_template_from_qb_output(
     period_end = _infer_period_end_from_source(wb_src)
     market_value, original_cost, unrealized_total, accrued_income = _extract_holdings_totals(wb_src)
 
-    wb_tpl = load_workbook(template_path)
     _apply_template_fills(
         wb_tpl,
         inferred_acct,
@@ -463,11 +461,25 @@ def populate_template_from_qb_output(
         unrealized_total,
         accrued_income,
     )
+    return inferred_acct
 
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    wb_tpl.save(out)
-    return str(out)
+
+def populate_template_from_qb_output(
+    template_path: str | Path,
+    qb_output_xlsx: str | Path,
+    output_path: str | Path,
+    account_id: str | None = None,
+) -> str:
+    wb_src = load_workbook(qb_output_xlsx, data_only=True)
+    try:
+        wb_tpl = load_workbook(template_path, keep_links=False)
+        apply_template_from_qb_workbook(wb_tpl, wb_src, account_id=account_id)
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        wb_tpl.save(out)
+        return str(out)
+    finally:
+        wb_src.close()
 
 
 def populate_template_from_fields_json(

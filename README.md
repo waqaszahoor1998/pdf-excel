@@ -73,6 +73,18 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
+### Keep your copy in sync with GitHub
+
+From the project root (with your venv activated):
+
+1. **See what changed:** `git status`
+2. **Pull latest on your branch:** `git pull origin v3.2` (replace `v3.2` with your branch if different)
+3. **After you edit files:**  
+   `git add -A` → `git commit -m "Short description of the change"` → `git push origin v3.2`
+4. If `git push` asks for auth, use a [personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) or SSH keys as configured for your GitHub account.
+
+The repo includes **`.flaskenv`** so the web app listens on **port 8003** by default when you run `flask --app app run`.
+
 **Digital PDF → Excel:**
 
 ```bash
@@ -84,7 +96,8 @@ python run.py tables path/to/report.pdf
 
 ```bash
 flask --app app run
-# Open http://127.0.0.1:5000 → upload PDF → Extract to Excel
+# Open http://127.0.0.1:8003 → upload PDF → Extract to Excel
+# Port 8003 is set in .flaskenv (FLASK_RUN_PORT). Override: --port 9000 or set FLASK_RUN_PORT in .env
 ```
 
 **Scanned PDF (vision model):**  
@@ -100,7 +113,7 @@ See [Scanned PDFs (VL)](#scanned-pdfs-vision-model-vl) below and `docs/TEST_AND_
 flask --app app run
 ```
 
-Open **http://127.0.0.1:5000**. Upload a PDF, then:
+Open **http://127.0.0.1:8003**. Upload a PDF, then:
 
 - **Extract to Excel** — Uses pdfplumber (digital) or, if you check **“Use vision model”**, the VL pipeline (scanned). You get a ZIP with .xlsx and .json.
 - **Ask AI** — Requires `ANTHROPIC_API_KEY` in `.env`; sends the PDF to Anthropic for natural-language extraction.
@@ -176,7 +189,7 @@ Full steps and “how to share with someone else” are in **`docs/TEST_AND_SHAR
 
 1. They need **Python 3.10+** and the project folder (clone or zip).
 2. **Digital PDFs only:**  
-   `python -m venv venv` → activate venv → `pip install -r requirements.txt` → `python run.py tables file.pdf` or run the web app with `flask --app app run`.
+   `python -m venv venv` → activate venv → `pip install -r requirements.txt` → `python run.py tables file.pdf` or run the web app with `flask --app app run` → open **http://127.0.0.1:8003**.
 3. **Scanned PDFs too:**  
    Also install `requirements-vl.txt`, run `scripts/download_qwen2vl.py`, and (optional) set up CUDA. Full steps: **`docs/TEST_AND_SHARE.md`**.
 

@@ -1,0 +1,617 @@
+# Template label coverage report (fuzzy)
+
+- **Template**: `/Users/m.w.zahoor/Downloads/family_template.xlsx`
+- **Extraction JSON**: `output/XXXXX3663_extraction.json`
+- **Labels scanned (col A)**: 327
+- **Matched (fuzzy)**: 267
+- **Missing (fuzzy)**: 60
+
+## Matched examples (first 80)
+
+- `Net Assets` row 10: **REVOCABLE TRUST**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `Net Assets` row 12: **STATEMENT OF NET ASSETS    | As of  01/31/2026**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `Net Assets` row 16: **Assets**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `Net Assets` row 17: **Cash & Cash Equivalents**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `Net Assets` row 20: **Accrued Interest and dividend**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `Net Assets` row 23: **Total Assets**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `Net Assets` row 25: **Liabilities**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `Net Assets` row 27: **Total  Liabilities**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `Net Assets` row 28: **Total Net Assets**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `Operations ` row 10: **REVOCABLE TRUST**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `Operations ` row 12: **STATEMENT OF OPERATIONS | Reporting Period: 01/01/2026 to 01/31/2026**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `Operations ` row 14: **Financial Account**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `Operations ` row 19: **Expenses**
+  - page None, kind `row_label`, section `Tabula_29`
+  - page None, kind `row_label`, section `Tabula_29`
+- `Operations ` row 22: **Account Fee**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `Operations ` row 23: **Management Fees**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `Operations ` row 27: **Realized and Unrealized Gain / (Loss) on  Investments**
+  - page None, kind `cell`, section `Tabula_2`
+  - page None, kind `cell`, section `Tabula_2`
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+- `Operations ` row 28: **Change in Unrealized Gain/(Loss)**
+  - page None, kind `cell`, section `Tabula_2`
+  - page None, kind `cell`, section `Tabula_2`
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+- `Operations ` row 29: **Long-term Realized Gain /(Loss)**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `Operations ` row 30: **Short-term Realized Gain /(Loss)**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 1: **MTD PNL Per Trading Account Summary**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 2: **Consolidated**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 6: **Account Name**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 7: **Investments**
+  - page None, kind `row_label`, section `Tabula_15`
+  - page None, kind `row_label`, section `Tabula_16`
+- `PLSummary` row 9: **Cash and cash equivalents**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 11: **Totals**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 12: **Accrued Dividend**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 13: **Accrued Interest**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 14: **Account Fees**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 16: **Change in unrealized gain/loss**
+  - page None, kind `cell`, section `Tabula_2`
+  - page None, kind `cell`, section `Tabula_2`
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+- `PLSummary` row 18: **Franchise Tax**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 21: **Long term realized gain/loss**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 23: **Short term realized gain/loss**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 24: **Withholding taxes**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 27: **Balance Sheet**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 28: **Accrued Interest and dividend**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 29: **Cash - Due from Broker**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 35: **Opening Capital**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 36: **Capital Contribution**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 37: **Capital Withdrwal**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 38: **Retained Earning**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 39: **Accrued Expense**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary` row 42: **Total Liabilities**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 1: **MTD PNL Per Trading Account Summary**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 2: **Goldman - Consolidated**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 7: **Account Name**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 8: **Investments**
+  - page None, kind `row_label`, section `Tabula_15`
+  - page None, kind `row_label`, section `Tabula_16`
+- `PLSummary Admin GS ` row 10: **Cash and cash equivalents**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 13: **Totals**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 14: **Change in Accrued Dividend**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 15: **Change in Accrued Interest**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 16: **Account Fee**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 18: **Change in unrealized gain/loss**
+  - page None, kind `cell`, section `Tabula_2`
+  - page None, kind `cell`, section `Tabula_2`
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+- `PLSummary Admin GS ` row 20: **Franchise Tax**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 23: **Long term realized gain/loss**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 25: **Short term realized gain/loss**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 26: **Withholding taxes**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 29: **Balance Sheet**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 30: **Accrued Interest and dividend**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 31: **Cash - Due from Broker**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 37: **Opening Capital**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 38: **Capital Contribution**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 39: **Capital Withdrwal**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 40: **Retained Earning**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 41: **Accrued Expense**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary Admin GS ` row 43: **Total Liabilities**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary JP Morgan Chase` row 1: **MTD PNL Per Trading Account Summary**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary JP Morgan Chase` row 2: **JP Morgan Chase**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary JP Morgan Chase` row 7: **Account Name**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary JP Morgan Chase` row 8: **Investments**
+  - page None, kind `row_label`, section `Tabula_15`
+  - page None, kind `row_label`, section `Tabula_16`
+- `PLSummary JP Morgan Chase` row 10: **Cash and cash equivalents**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary JP Morgan Chase` row 12: **Totals**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary JP Morgan Chase` row 13: **Accrued Dividend**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary JP Morgan Chase` row 14: **Accrued Interest**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary JP Morgan Chase` row 15: **Accounting Fees**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary JP Morgan Chase` row 17: **Change in unrealized gain/loss**
+  - page None, kind `cell`, section `Tabula_2`
+  - page None, kind `cell`, section `Tabula_2`
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+- `PLSummary JP Morgan Chase` row 19: **Franchise Tax**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary JP Morgan Chase` row 22: **Long term realized gain/loss**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary JP Morgan Chase` row 24: **Short term realized gain/loss**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary JP Morgan Chase` row 25: **Withholding taxes**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+- `PLSummary JP Morgan Chase` row 28: **Balance Sheet**
+  - page None, kind `column_header`, section `Tabula_3`
+  - page None, kind `column_header`, section `Tabula_4`
+  - page None, kind `column_header`, section `Tabula_5`
+  - page None, kind `column_header`, section `Tabula_6`
+  - page None, kind `column_header`, section `Tabula_7`
+  - page None, kind `column_header`, section `Tabula_8`
+
+## Missing examples (first 120)
+
+- `Net Assets` row 14: Description
+- `Net Assets` row 18: Investment in Securities
+- `Net Assets` row 19: Other Investments- Wines
+- `Net Assets` row 26: Securities sold short
+- `Operations ` row 16: Revenues
+- `Operations ` row 17: Interest Income
+- `Operations ` row 18: Dividend Income
+- `Operations ` row 21: Broker Fees
+- `Operations ` row 24: Interest Expenses
+- `Operations ` row 25: Net Investment Income/(Loss)
+- `Operations ` row 31: Net Income/(Loss)
+- `PLSummary` row 15: Broker fees
+- `PLSummary` row 17: Dividend Income
+- `PLSummary` row 19: Interest expense
+- `PLSummary` row 20: Interest Income
+- `PLSummary` row 22: Other income
+- `PLSummary` row 30: Investment in Securities
+- `PLSummary` row 34: Securities sold short
+- `PLSummary` row 40: Net Income
+- `PLSummary` row 44: Difference
+- `PLSummary Admin GS ` row 17: Broker fees
+- `PLSummary Admin GS ` row 19: Dividend Income
+- `PLSummary Admin GS ` row 21: Interest expense
+- `PLSummary Admin GS ` row 22: Interest Income
+- `PLSummary Admin GS ` row 24: Other income
+- `PLSummary Admin GS ` row 32: Investment in Securities
+- `PLSummary Admin GS ` row 36: Securities sold short
+- `PLSummary Admin GS ` row 42: Net Income
+- `PLSummary Admin GS ` row 45: Difference
+- `PLSummary JP Morgan Chase` row 16: Broker fees
+- `PLSummary JP Morgan Chase` row 18: Dividend Income
+- `PLSummary JP Morgan Chase` row 20: Interest expense
+- `PLSummary JP Morgan Chase` row 21: Interest Income
+- `PLSummary JP Morgan Chase` row 23: Other income
+- `PLSummary JP Morgan Chase` row 31: Investment in Securities
+- `PLSummary JP Morgan Chase` row 35: Securities sold short
+- `PLSummary JP Morgan Chase` row 41: Net Income
+- `PLSummary JP Morgan Chase` row 45: Difference
+- `PLSummary Wells Fargo` row 16: Broker fees
+- `PLSummary Wells Fargo` row 18: Dividend Income
+- `PLSummary Wells Fargo` row 20: Interest expense
+- `PLSummary Wells Fargo` row 21: Interest Income
+- `PLSummary Wells Fargo` row 23: Other income
+- `PLSummary Wells Fargo` row 31: Investment in Securities
+- `PLSummary Wells Fargo` row 35: Securities sold short
+- `PLSummary Wells Fargo` row 41: Net Income
+- `PLSummary Wells Fargo` row 45: Difference
+- `Unrealized` row 18: Longs
+- `Unrealized` row 27: Longs
+- `Unrealized` row 36: Longs
+- `Unrealized` row 45: Longs
+- `Unrealized` row 54: Longs
+- `Unrealized` row 63: Longs
+- `Unrealized` row 72: Longs
+- `Unrealized` row 87: Longs
+- `Unrealized` row 97: Longs
+- `Unrealized` row 107: Longs
+- `Unrealized` row 117: Longs
+- `Unrealized` row 132: Longs
+- `Unrealized` row 142: Longs

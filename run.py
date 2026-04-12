@@ -5,6 +5,10 @@ Single entry point for PDF → Excel.
   python run.py tables <pdf> [pdf2 ...]   Extract all tables to QB-format Excel. Batch: multiple PDFs → multiple .xlsx.
   python run.py json <pdf> [pdf2 ...]     Extract PDF to JSON first (sections + rows); then you can convert to Excel.
   python run.py ask <pdf> <query>         AI agent: extract what you ask for. Optional: multiple PDFs with same query.
+  python run.py populate-family-template --template family_template.xlsx --jpm-pdf jpm.pdf --gs-pdf gs.pdf
+                                            One workbook: JPM + Goldman fills in the same template output.
+
+  Web UI: flask --app app run  →  http://127.0.0.1:8003  (port from .flaskenv)
 """
 
 import argparse
@@ -28,6 +32,8 @@ from pdf_to_qb import pdf_to_qb_excel, transform_extracted_to_qb
 from template_populator import populate_template_from_fields_json, populate_template_from_qb_output
 from fields_from_qb_output import extract_fields
 from pdf_json_audit import audit_pdf_vs_extraction_json, apply_audit_to_extraction_file
+from scripts.populate_jpm_template_from_pdf import populate_jpm_template_from_pdf
+from scripts.family_template_merge import populate_family_template
 
 
 def _expand_pdfs(paths):
@@ -285,7 +291,15 @@ def cmd_json(args) -> int:
         if len(pdfs) > 1:
             print(f"[{i+1}/{len(pdfs)}] {pdf}")
         try:
-            result = pdf_to_json(str(pdf), out, overwrite=not args.no_overwrite)
+            result = pdf_to_json(
+                str(pdf),
+                out,
+                overwrite=not args.no_overwrite,
+                refine_sections=not getattr(args, "json_raw", False),
+                page_text_preview=getattr(args, "json_page_text_preview", False),
+                page_text_preview_chars=int(getattr(args, "json_page_text_chars", 800) or 800),
+                group_by_page=getattr(args, "json_by_page", False),
+            )
             print(f"Saved: {result}")
             if not getattr(args, "no_audit", False):
                 _, ok = apply_audit_to_extraction_file(
@@ -509,6 +523,113 @@ def cmd_populate_template_from_fields(args) -> int:
         return 1
 
 
+def cmd_populate_template_jpm(args) -> int:
+    """
+    Populate the JPM blocks in a template directly from a JPM PDF.
+
+    This bypasses the QB extraction step and reads the PDF text layer directly,
+    writing values into the template's `PLSummary JP Morgan Chase` account blocks.
+    """
+    pdfs = _expand_pdfs(args.pdfs)
+    if not pdfs:
+        print("Error: No PDF files found.", file=sys.stderr)
+        return 1
+    if len(pdfs) > 1:
+        print("Error: populate-template-jpm currently supports one PDF at a time.", file=sys.stderr)
+        return 1
+
+    pdf = str(pdfs[0])
+    template = Path(args.template)
+    if not template.exists():
+        print(f"Error: Template not found: {template}", file=sys.stderr)
+        return 1
+
+    default_dir = _default_output_dir()
+    out = args.output or str(Path(default_dir) / f"{Path(template).stem}_jpm_populated.xlsx")
+    out_path = Path(out)
+    if out_path.exists() and args.no_overwrite:
+        print(f"Error: Output exists: {out_path}", file=sys.stderr)
+        return 1
+
+    try:
+        accounts = None
+        if getattr(args, "accounts", None):
+            accounts = [a.strip() for a in str(args.accounts).split(",") if a.strip()]
+        result = populate_jpm_template_from_pdf(
+            template_path=str(template),
+            pdf_path=pdf,
+            output_path=str(out_path),
+            accounts=accounts,
+        )
+        print(f"Saved: {result}")
+        return 0
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_populate_family_template(args) -> int:
+    """
+    Single output workbook: fill JPM blocks from a JPM PDF and Goldman blocks from
+    one or more Goldman PDFs (via QB extraction), without separate per-bank files.
+    """
+    template = Path(args.template)
+    if not template.exists():
+        print(f"Error: Template not found: {template}", file=sys.stderr)
+        return 1
+
+    jpm_pdf = getattr(args, "jpm_pdf", None)
+    gs_pdfs = list(getattr(args, "gs_pdfs", None) or [])
+    if not jpm_pdf and not gs_pdfs:
+        print("Error: provide --jpm-pdf and/or --gs-pdf (repeat --gs-pdf for multiple).", file=sys.stderr)
+        return 1
+
+    default_dir = _default_output_dir()
+    out = args.output or str(Path(default_dir) / "family_template_filled.xlsx")
+    out_path = Path(out)
+    if out_path.exists() and args.no_overwrite:
+        print(f"Error: Output exists: {out_path}", file=sys.stderr)
+        return 1
+
+    gs_account_arg = getattr(args, "gs_account", None)
+    pairs: list[tuple[str, str | None]] = []
+    if gs_pdfs:
+        if gs_account_arg:
+            parts = [x.strip() for x in str(gs_account_arg).split(",") if x.strip()]
+            if len(parts) == len(gs_pdfs):
+                accts: list[str | None] = parts
+            elif len(parts) == 1:
+                accts = [parts[0]] * len(gs_pdfs)
+            else:
+                print(
+                    "Error: --gs-account must be one account for all GS PDFs, "
+                    "or a comma-separated list with the same length as --gs-pdf.",
+                    file=sys.stderr,
+                )
+                return 1
+        else:
+            accts = [None] * len(gs_pdfs)
+        pairs = [(str(p), a) for p, a in zip(gs_pdfs, accts)]
+
+    jpm_accounts = None
+    if getattr(args, "jpm_accounts", None):
+        jpm_accounts = [a.strip() for a in str(args.jpm_accounts).split(",") if a.strip()]
+
+    try:
+        result = populate_family_template(
+            template,
+            out_path,
+            jpm_pdf=jpm_pdf,
+            jpm_accounts=jpm_accounts,
+            gs_pdf_account_pairs=pairs or None,
+        )
+        print(f"Saved: {result}")
+        return 0
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="PDF → Excel: extract tables (offline) or ask the AI agent for specific data.",
@@ -565,6 +686,27 @@ def main() -> int:
     )
     p_json.add_argument("--audit-strict", action="store_true", help="Fail command (exit 2) when audit requires review")
     p_json.add_argument("--audit-report", default=None, help="Optional path to write full audit report JSON")
+    p_json.add_argument(
+        "--json-raw",
+        action="store_true",
+        help="Keep long narrative-only rows in JSON (skip refine_json_sections; closer to raw extraction)",
+    )
+    p_json.add_argument(
+        "--json-page-text-preview",
+        action="store_true",
+        help="Add meta.page_text_preview: first N chars of each page text (PyMuPDF) for auditing gaps",
+    )
+    p_json.add_argument(
+        "--json-page-text-chars",
+        type=int,
+        default=800,
+        help="Max characters per page for --json-page-text-preview (default: 800)",
+    )
+    p_json.add_argument(
+        "--json-by-page",
+        action="store_true",
+        help="Also write top-level 'pages': { \"1\": [sections...], \"2\": [...] } (flat 'sections' kept for compatibility)",
+    )
     p_json.set_defaults(func=cmd_json)
 
     p_audit = sub.add_parser("audit-json", help="Audit extraction JSON against its source PDF (numeric/text gaps, invented values)")
@@ -606,6 +748,45 @@ def main() -> int:
     p_pop_tpl_fields.add_argument("--account-id", default=None, help="Optional account id override (e.g. 366-3)")
     p_pop_tpl_fields.add_argument("--no-overwrite", action="store_true", help="Do not overwrite existing output")
     p_pop_tpl_fields.set_defaults(func=cmd_populate_template_from_fields)
+
+    p_pop_tpl_jpm = sub.add_parser(
+        "populate-template-jpm",
+        help="Populate JPM blocks in a template directly from a JPM PDF (text-layer extraction)",
+    )
+    p_pop_tpl_jpm.add_argument("pdfs", nargs="+", help="One JPM PDF file path")
+    p_pop_tpl_jpm.add_argument("--template", required=True, help="Path to template .xlsx")
+    p_pop_tpl_jpm.add_argument("-o", "--output", default=None, help="Output populated .xlsx path")
+    p_pop_tpl_jpm.add_argument("--accounts", default=None, help="Optional comma-separated account list (e.g. 1004,9004)")
+    p_pop_tpl_jpm.add_argument("--no-overwrite", action="store_true", help="Do not overwrite existing output")
+    p_pop_tpl_jpm.set_defaults(func=cmd_populate_template_jpm)
+
+    p_pop_fam = sub.add_parser(
+        "populate-family-template",
+        help="Fill one template workbook from JPM PDF + Goldman PDF(s) (single .xlsx output)",
+    )
+    p_pop_fam.add_argument("--template", required=True, help="Path to family_template.xlsx (empty template)")
+    p_pop_fam.add_argument("-o", "--output", default=None, help="Output .xlsx path (default: output/family_template_filled.xlsx)")
+    p_pop_fam.add_argument("--jpm-pdf", default=None, help="JP Morgan statement PDF (optional)")
+    p_pop_fam.add_argument(
+        "--jpm-accounts",
+        default=None,
+        help="Comma-separated JPM account blocks to fill, e.g. 1004,9004 (default: all in template)",
+    )
+    p_pop_fam.add_argument(
+        "--gs-pdf",
+        action="append",
+        default=[],
+        dest="gs_pdfs",
+        metavar="PATH",
+        help="Goldman PDF (repeat for multiple statements)",
+    )
+    p_pop_fam.add_argument(
+        "--gs-account",
+        default=None,
+        help="Goldman template account id(s): one value for all --gs-pdf, or comma list matching each PDF",
+    )
+    p_pop_fam.add_argument("--no-overwrite", action="store_true", help="Do not overwrite existing output")
+    p_pop_fam.set_defaults(func=cmd_populate_family_template)
 
     p_fields = sub.add_parser(
         "fields",
